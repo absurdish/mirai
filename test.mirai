@@ -1,0 +1,5 @@
+use core
+
+main(){
+    print: 'hello, world'
+}
