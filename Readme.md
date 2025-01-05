@@ -2,4 +2,4 @@
 
 # Mirai Programming Language
 
-Futuristic programming language, currently under the heavy development
+Futuristic programming language. Currently under the development!

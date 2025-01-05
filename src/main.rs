@@ -2,6 +2,7 @@
 use cli::cli;
 mod cli;
 mod consts;
+mod scanner;
 
 fn main() {
     // load cli

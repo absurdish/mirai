@@ -1,8 +1,8 @@
-use std::{fs::File, path::Path};
-use crate::consts::*;
+use crate::{consts::*, scanner::Scanner};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
+use std::{fs::File, path::Path};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, color = clap::ColorChoice::Always)]
@@ -79,8 +79,10 @@ fn cmd_run(targ: String, args: Vec<String>) {
         Ok(file) => match unsafe { Mmap::map(&file) } {
             Ok(mmap) => {
                 println!("{}", format!("running: {}", targ).fg_hex(C2));
-                let content = std::str::from_utf8(&mmap).unwrap_or("<binary or invalid UTF-8>");
-                println!("{}", format!("file content:\n{}", content).fg_hex(C3));
+                let input = std::str::from_utf8(&mmap).unwrap_or("<binary or invalid UTF-8>");
+                let mut scanner = Scanner::new(input);
+                let tokens = scanner.start();
+                println!("{:?}", tokens);
             }
             Err(err) => {
                 println!(
