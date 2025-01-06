@@ -1,8 +1,13 @@
-use crate::{consts::*, scanner::Scanner};
+use crate::{consts::*, parser::Parser as MirParser, scanner::Scanner};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
+mod core;
+mod linkers;
+mod music;
+mod packman;
+mod play;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, color = clap::ColorChoice::Always)]
@@ -82,7 +87,9 @@ fn cmd_run(targ: String, args: Vec<String>) {
                 let input = std::str::from_utf8(&mmap).unwrap_or("<binary or invalid UTF-8>");
                 let mut scanner = Scanner::new(input);
                 let tokens = scanner.start();
-                println!("{:?}", tokens);
+                let mut parser = MirParser::new(tokens);
+                let stmts = parser.start();
+                println!("{:?}", stmts);
             }
             Err(err) => {
                 println!(

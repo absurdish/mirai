@@ -1,6 +1,6 @@
 use unicode_xid::UnicodeXID;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Keyword(String),
     SingleChar(char),
@@ -12,7 +12,7 @@ pub enum TokenType {
 
 use TokenType::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LitVal {
     Int(i16),
     Int32(i32),
@@ -20,20 +20,22 @@ pub enum LitVal {
     Unt32(u32),
     Flt(f32),
     F64(f64),
-    Imaginary32(f32),
-    Imaginary64(f64),
+    Im32(f32),
+    Im64(f64),
     Str(String),
     Chr(char),
+    Nil,
+    Bol(bool),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token<'a> {
-    lexeme: &'a str,
-    token_type: TokenType,
-    value: Option<LitVal>,
-    line: usize,
-    pos: usize,
-    length: usize,
+    pub lexeme: &'a str,
+    pub token_type: TokenType,
+    pub value: Option<LitVal>,
+    pub line: usize,
+    pub pos: usize,
+    pub length: usize,
 }
 
 impl<'a> Token<'a> {
@@ -90,8 +92,7 @@ impl<'a> Scanner<'a> {
                 self.handle_operator(c)
             }
             '/' => self.handle_slash(),
-            '\'' => self.handle_char_literal(),
-            '"' => self.handle_string_literal(),
+            '\'' => self.handle_string_literal(),
             '\r' => {}
             '\t' => self.pos += 4,
             ' ' => self.pos += 1,
@@ -123,7 +124,9 @@ impl<'a> Scanner<'a> {
             | ('>', '=')
             | ('!', '=')
             | ('+', '+')
+            | ('+', '=')
             | ('-', '-')
+            | ('-', '=')
             | ('*', '=')
             | ('=', '>')
             | ('.', '.') => {
@@ -163,23 +166,8 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    fn handle_char_literal(&mut self) {
-        let c = self.advance();
-        if self.peek() == '\'' {
-            self.advance();
-            self.push(Literal, Some(LitVal::Chr(c)));
-        } else {
-            while self.peek() != '\'' && !self.is_eof() {
-                self.advance();
-            }
-            self.advance();
-            let lexeme = &self.input[self.start + 1..self.current - 1];
-            self.push(Literal, Some(LitVal::Str(lexeme.to_string())));
-        }
-    }
-
     fn handle_string_literal(&mut self) {
-        while self.peek() != '"' && !self.is_eof() {
+        while self.peek() != '\'' && !self.is_eof() {
             if self.peek() == '\\' {
                 self.advance();
             }
@@ -187,7 +175,14 @@ impl<'a> Scanner<'a> {
         }
         self.advance();
         let lexeme = &self.input[self.start + 1..self.current - 1];
-        self.push(Literal, Some(LitVal::Str(lexeme.to_string())));
+        if lexeme.len() == 1 {
+            self.push(
+                Literal,
+                Some(LitVal::Chr(lexeme.chars().next().unwrap_or('\0'))),
+            );
+        } else {
+            self.push(Literal, Some(LitVal::Str(lexeme.to_string())));
+        }
     }
 
     fn handle_number(&mut self) {
@@ -207,7 +202,7 @@ impl<'a> Scanner<'a> {
             if is_float {
                 let lexeme = &self.input[self.start..self.current - 1];
                 let value = lexeme.parse::<f32>().unwrap();
-                self.push(Literal, Some(LitVal::Imaginary32(value)));
+                self.push(Literal, Some(LitVal::Im32(value)));
             }
         } else {
             let lexeme = &self.input[self.start..self.current];
@@ -215,8 +210,13 @@ impl<'a> Scanner<'a> {
                 let val = lexeme.parse::<f32>().unwrap();
                 LitVal::Flt(val)
             } else {
-                let val = lexeme.parse::<i32>().unwrap();
-                LitVal::Int32(val)
+                match lexeme.parse::<i16>() {
+                    Ok(lex) => LitVal::Int(lex),
+                    _ => {
+                        let val = lexeme.parse::<i32>().unwrap();
+                        LitVal::Int32(val)
+                    }
+                }
             };
             self.push(Literal, Some(value));
         }
@@ -228,7 +228,8 @@ impl<'a> Scanner<'a> {
         }
         let lexeme = &self.input[self.start..self.current];
         let token_type = match lexeme {
-            "if" | "else" | "for" | "while" | "return" | "int" | "str" => {
+            "if" | "else" | "for" | "while" | "return" | "int" | "i16" | "i32" | "unt" | "u16"
+            | "u32" | "flt" | "f32" | "f64" | "bol" | "str" | "chr" | "nil" => {
                 Keyword(lexeme.to_string())
             }
             _ => Identifier,
