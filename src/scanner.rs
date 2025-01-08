@@ -6,13 +6,13 @@ pub enum TokenType {
     SingleChar(char),
     DblChar((char, char)),
     Identifier,
-    Literal,
+    Literal(LitVal),
     EoF,
 }
 
 use TokenType::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LitVal {
     Int(i16),
     Int32(i32),
@@ -24,8 +24,8 @@ pub enum LitVal {
     Im64(f64),
     Str(String),
     Chr(char),
-    Nil,
     Bol(bool),
+    Nil,
 }
 
 #[derive(Debug, Clone)]
@@ -176,12 +176,14 @@ impl<'a> Scanner<'a> {
         self.advance();
         let lexeme = &self.input[self.start + 1..self.current - 1];
         if lexeme.len() == 1 {
+            let val = lexeme.chars().next().unwrap_or('\0');
             self.push(
-                Literal,
-                Some(LitVal::Chr(lexeme.chars().next().unwrap_or('\0'))),
+                Literal(LitVal::Chr(val)),
+                Some(LitVal::Chr(val)),
             );
         } else {
-            self.push(Literal, Some(LitVal::Str(lexeme.to_string())));
+            let val = LitVal::Str(lexeme.to_string());
+            self.push(Literal(val.clone()), Some(val));
         }
     }
 
@@ -202,7 +204,7 @@ impl<'a> Scanner<'a> {
             if is_float {
                 let lexeme = &self.input[self.start..self.current - 1];
                 let value = lexeme.parse::<f32>().unwrap();
-                self.push(Literal, Some(LitVal::Im32(value)));
+                self.push(Literal(LitVal::Im32(value)), Some(LitVal::Im32(value)));
             }
         } else {
             let lexeme = &self.input[self.start..self.current];
@@ -218,7 +220,7 @@ impl<'a> Scanner<'a> {
                     }
                 }
             };
-            self.push(Literal, Some(value));
+            self.push(Literal(value.clone()), Some(value));
         }
     }
 
@@ -229,7 +231,7 @@ impl<'a> Scanner<'a> {
         let lexeme = &self.input[self.start..self.current];
         let token_type = match lexeme {
             "if" | "else" | "for" | "while" | "return" | "int" | "i16" | "i32" | "unt" | "u16"
-            | "u32" | "flt" | "f32" | "f64" | "bol" | "str" | "chr" | "nil" => {
+            | "u32" | "flt" | "f32" | "f64" | "bol" | "str" | "chr" | "nil" | "true" | "false" | "end" => {
                 Keyword(lexeme.to_string())
             }
             _ => Identifier,
