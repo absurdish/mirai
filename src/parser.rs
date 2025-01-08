@@ -98,8 +98,8 @@ impl<'a> Parser<'a> {
     }
 
     pub fn start(&mut self) -> Result<Vec<Stmt<'a>>, ParserError> {
-        let mut stmts = Vec::with_capacity(self.tokens.len() / 2);
-        while self.current < self.tokens.len() {
+        let mut stmts = Vec::with_capacity((self.tokens.len() as f32 / 4.0).round() as usize + 1);
+        while !self.is_at_end() && self.peek().token_type != EoF {
             stmts.push(self.stmt()?);
         }
         stmts.shrink_to_fit();
@@ -138,6 +138,7 @@ impl<'a> Parser<'a> {
         self.consume(SingleChar('='))?;
         let is_const = self.match_token(SingleChar('='));
         let value = self.expr()?;
+
         Ok(Stmt::Var {
             id: name,
             type_,
@@ -214,9 +215,6 @@ impl<'a> Parser<'a> {
         self.binary()
     }
 
-    fn check_term(&self) -> bool {
-        !self.is_at_end() || self.peek().lexeme != "\n"
-    }
     pub fn binary(&mut self) -> Result<Expr<'a>, ParserError> {
         let mut expr = self.unary()?;
         while !self.is_at_end() && self.match_any(&[
@@ -252,7 +250,6 @@ impl<'a> Parser<'a> {
                 rhs: Box::new(rhs),
             })
         } else {
-            println!("{:?}", self.peek().lexeme);
             self.call()
         }
     }
@@ -304,9 +301,7 @@ impl<'a> Parser<'a> {
                     value: self.token_to_literal(self.prev(1)),
                 })
             }
-            _ => {
-                Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()))
-            }
+            _ => Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()))
         }
     }
 
@@ -317,7 +312,7 @@ impl<'a> Parser<'a> {
         }
     }
     //
-    //
+    // parser helpers
     //
     fn consume_if_matches(&mut self, token_type: TokenType) -> Option<Token<'a>> {
         if self.check(&token_type) {
@@ -328,6 +323,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_type_kwd(&self, k: &'a str) -> bool {
+        // pull the custom types from the memory in the future
         matches!(
             k,
             "int"
