@@ -1,8 +1,10 @@
-use crate::{consts::*, parser::Parser as MirParser, scanner::Scanner};
+use crate::{consts::*, core::parser::Parser as MirParser, core::scanner::Scanner};
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
+use crate::core::resolver::Resolver;
+
 mod core;
 mod linkers;
 mod music;
@@ -18,10 +20,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmds {
-    /// mirai run <targ> [args]
+    /// mirai run <target> [args]
     Run {
         /// The file or directory to run
-        targ: String,
+        target: String,
         /// Additional arguments for the program
         #[arg()]
         args: Vec<String>,
@@ -35,7 +37,7 @@ pub fn cli() {
 
     if let Some(command) = cli.command {
         match command {
-            Cmds::Run { targ, args } => cmd_run(targ, args),
+            Cmds::Run { target, args } => cmd_run(target, args),
             Cmds::Version => cmd_version(),
         }
     } else {
@@ -57,9 +59,9 @@ pub fn cli() {
 }
 
 /// `mirai run <target> [args]`
-fn cmd_run(targ: String, args: Vec<String>) {
+fn cmd_run(target: String, args: Vec<String>) {
     let valid_extensions = ["mirai", "mir", "mr"];
-    let path = Path::new(&targ);
+    let path = Path::new(&target);
 
     if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
         if !valid_extensions.contains(&extension) {
@@ -67,41 +69,43 @@ fn cmd_run(targ: String, args: Vec<String>) {
                 "{}",
                 format!(
                     "error: '{}' has an invalid extension. Allowed: .mirai, .mir, .mr",
-                    targ
+                    target
                 )
-                .red()
+                    .red()
             );
             return;
         }
     } else {
         println!(
             "{}",
-            format!("error: '{}' is not a valid file.", targ).red()
+            format!("error: '{}' is not a valid file.", target).red()
         );
         return;
     }
-    match File::open(&targ) {
+    match File::open(&target) {
         Ok(file) => match unsafe { Mmap::map(&file) } {
             Ok(mmap) => {
-                println!("{}", format!("running: {}", targ).fg_hex(C2));
+                println!("{}", format!("running: {}", target).fg_hex(C2));
                 let input = std::str::from_utf8(&mmap).unwrap_or("<binary or invalid UTF-8>");
                 let mut scanner = Scanner::new(input);
                 let tokens = scanner.start();
                 let mut parser = MirParser::new(tokens);
                 let stmts = parser.start();
-                println!("{:?}", stmts);
+                let mut resolver = Resolver::new();
+                let locals = Resolver::resolve(&mut resolver, stmts.unwrap());
+                println!("{:?}", locals);
             }
             Err(err) => {
                 println!(
                     "{}",
-                    format!("error: failed to memory-map file '{}': {}", targ, err).red()
+                    format!("error: failed to memory-map file '{}': {}", target, err).red()
                 );
             }
         },
         Err(err) => {
             println!(
                 "{}",
-                format!("error: failed to read file '{}': {}", targ, err).red()
+                format!("error: failed to read file '{}': {}", target, err).red()
             );
         }
     }

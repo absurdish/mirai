@@ -2,8 +2,8 @@
 use cli::cli;
 mod cli;
 mod consts;
-mod scanner;
-mod parser;
+mod core;
+
 fn main() {
     // load cli
     cli();
