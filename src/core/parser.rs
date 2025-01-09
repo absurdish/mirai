@@ -1,7 +1,7 @@
-use crate::core::scanner::{LitVal, Token, TokenType::{self, *}};
+use crate::core::scanner::{Value, Token, TokenType::{self, *}};
 use std::fmt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'a> {
     Assign {
         id: usize,
@@ -13,19 +13,19 @@ pub enum Expr<'a> {
     Unary { id: usize, op: Token<'a>, rhs: Box<Expr<'a>> },
     Binary { id: usize, op: Token<'a>, lhs: Box<Expr<'a>>, rhs: Box<Expr<'a>> },
     Grouping { id: usize, expr: Box<Expr<'a>> },
-    Value { id: usize, value: LitVal },
+    Value { id: usize, value: Value<'a> },
     Null,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UseKinds<'a> {
     Str(&'a str),
     List(Vec<&'a str>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt<'a> {
-    Nil,
+    Print(Expr<'a>),
     Var {
         id: Token<'a>,
         type_: Token<'a>,
@@ -114,6 +114,11 @@ impl<'a> Parser<'a> {
             Keyword(k) => match k.as_str() {
                 "if" => self.stmt_if(),
                 "while" => self.stmt_while(),
+                "print" => {
+                    self.consume(Keyword("print".to_string()))?;
+                    let expr = self.expr()?;
+                    Ok(Stmt::Print(expr))
+                }
                 _ if self.is_type_kwd(k) => {
                     let type_ = self.consume(Keyword(k.clone()))?;
                     let name = self.consume(Identifier)?;
@@ -304,10 +309,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn token_to_literal(&mut self, token: Token) -> LitVal {
+    pub fn token_to_literal(&mut self, token: Token<'a>) -> Value<'a> {
         match token.token_type {
             Literal(c) => c,
-            _ => LitVal::Nil,
+            _ => Value::Nil,
         }
     }
     //
@@ -419,7 +424,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn match_token(&mut self, token_type: TokenType) -> bool {
+    pub fn match_token(&mut self, token_type: TokenType<'a>) -> bool {
         if self.check(&token_type) {
             self.advance();
             true
@@ -428,7 +433,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn match_any(&mut self, token_types: &[TokenType]) -> bool {
+    pub fn match_any(&mut self, token_types: &[TokenType<'a>]) -> bool {
         for token_type in token_types {
             if self.match_token(token_type.clone()) {
                 return true;
@@ -436,7 +441,7 @@ impl<'a> Parser<'a> {
         }
         false
     }
-    pub fn match_any_token(&mut self, token_types: &[TokenType]) -> Option<TokenType> {
+    pub fn match_any_token(&mut self, token_types: &[TokenType<'a>]) -> Option<TokenType<'a>> {
         for token_type in token_types {
             if self.match_token(token_type.clone()) {
                 return Some(token_type.clone());

@@ -40,7 +40,7 @@ impl<'a> Resolver<'a> {
     }
 
     /// resolve the statements
-    pub fn resolve(&mut self, stmts: Vec<Stmt<'a>>) -> &HashMap<usize, usize> {
+    pub fn resolve(&mut self, stmts: &Vec<Stmt<'a>>) -> &HashMap<usize, usize> {
         for stmt in stmts {
             self.resolve_stmt(&stmt);
         }
@@ -66,6 +66,7 @@ impl<'a> Resolver<'a> {
                 self.define(name);
                 self.resolve_function(params, body, FuncType::Function);
             }
+            Stmt::Print(expr) => self.resolve_expr(expr),
             _ => unimplemented!(),
         }
     }

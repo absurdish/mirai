@@ -3,6 +3,7 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
+use crate::core::interpreter::Interpreter;
 use crate::core::resolver::Resolver;
 
 mod core;
@@ -90,10 +91,11 @@ fn cmd_run(target: String, args: Vec<String>) {
                 let mut scanner = Scanner::new(input);
                 let tokens = scanner.start();
                 let mut parser = MirParser::new(tokens);
-                let stmts = parser.start();
+                let stmts = parser.start().unwrap();
                 let mut resolver = Resolver::new();
-                let locals = Resolver::resolve(&mut resolver, stmts.unwrap());
-                println!("{:?}", locals);
+                Resolver::resolve(&mut resolver, &stmts);
+                let mut interpreter = Interpreter::new();
+                interpreter.start(stmts);
             }
             Err(err) => {
                 println!(

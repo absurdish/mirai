@@ -2,32 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use crate::core::parser::Stmt;
-
-// represents different types of values in the memory
-#[derive(Clone, Debug)]
-enum Value<'a> {
-    //
-    // variable:
-    //
-    // i32, i64, u32, u64 ->
-    Int(i64),
-    // f32, f64 ->
-    Float(f64),
-    // chr, str ->
-    Str(&'a str),
-    // bool, true, false
-    Bool(bool),
-    // reference to heap memory
-    HeapRef(usize),
-    //
-    // functions:
-    //
-    Function(Function<'a>),
-    None,
-}
+use crate::core::scanner::Value;
 
 /// represents a function stored in memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Function<'a> {
     name: &'a str,
     params: Vec<&'a str>,
