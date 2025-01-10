@@ -3,8 +3,12 @@ use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
+use std::collections::HashMap;
+use std::process::exit;
 use crate::core::interpreter::Interpreter;
+use crate::core::memory::HeapValue;
 use crate::core::resolver::Resolver;
+use crate::core::scanner::Value;
 
 mod core;
 mod linkers;
@@ -91,11 +95,25 @@ fn cmd_run(target: String, args: Vec<String>) {
                 let mut scanner = Scanner::new(input);
                 let tokens = scanner.start();
                 let mut parser = MirParser::new(tokens);
-                let stmts = parser.start().unwrap();
+                let stmts = match parser.start() {
+                    Ok(stmts) => stmts,
+                    Err(err) => {
+                        eprintln!("{}", err);
+                        exit(0)
+                    }
+                };
                 let mut resolver = Resolver::new();
                 Resolver::resolve(&mut resolver, &stmts);
                 let mut interpreter = Interpreter::new();
                 interpreter.start(stmts);
+                //
+                let mem = interpreter.memory.borrow();
+                let heap: HashMap<usize, Value> = mem.heap
+                    .iter()
+                    .map(|(i, f)| (*i, f.borrow().value.clone()))  // Borrowing the value and cloning it
+                    .collect();
+                println!("stack: {:?}", mem.stack);
+                println!("heap: {:?}", heap);
             }
             Err(err) => {
                 println!(

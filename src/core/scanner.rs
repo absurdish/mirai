@@ -1,4 +1,9 @@
+use coloredpp::Colorize;
 use unicode_xid::UnicodeXID;
+use TokenType::*;
+use crate::consts::KEYWORDS;
+use crate::core::memory::Function;
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType<'a> {
@@ -9,9 +14,6 @@ pub enum TokenType<'a> {
     Literal(Value<'a>),
     EoF,
 }
-
-use TokenType::*;
-use crate::core::memory::Function;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
@@ -29,6 +31,49 @@ pub enum Value<'a> {
     HeapRef(usize),
     Function(Function<'a>),
     Nil,
+}
+impl<'a> Value<'a> {
+    pub fn same_type(&self, v2: &Value) -> bool {
+        match (self, v2) {
+            (Int(_), Int(_)) => true,
+            (Int32(_), Int32(_)) => true,
+            (Unt(_), Unt(_)) => true,
+            (Unt32(_), Unt32(_)) => true,
+            (Flt(_), Flt(_)) => true,
+            (F64(_), F64(_)) => true,
+            (Im32(_), Im32(_)) => true,
+            (Im64(_), Im64(_)) => true,
+            (Str(_), Str(_)) => true,
+            (Chr(_), Chr(_)) => true,
+            (Bol(_), Bol(_)) => true,
+            (HeapRef(_), HeapRef(_)) => true,
+            (Function(_), Function(_)) => true,
+            (Nil, Nil) => true,
+            _ => false,
+        }
+    }
+}
+use crate::core::scanner::Value::*;
+
+impl std::fmt::Display for Value<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Int(i) => write!(f, "{}", i.blue()),
+            Int32(i) => write!(f, "{}", i.blue()),
+            Unt(i) => write!(f, "{}", i.blue()),
+            Unt32(i) => write!(f, "{}", i.blue()),
+            Flt(i) => write!(f, "{}", i.blue()),
+            F64(i) => write!(f, "{}", i.blue()),
+            Bol(i) => write!(f, "{}", i.blue()),
+            HeapRef(i) => write!(f, "{}", i.yellow()),
+            Im32(i) => write!(f, "{}{}", i.blue(), "i".green()),
+            Im64(i) => write!(f, "{}{}", i.blue(), "i".green()),
+            Str(i) => write!(f, "'{}'", i.yellow()),
+            Chr(i) => write!(f, "'{}'", i.yellow()),
+            Nil => write!(f, "nil"),
+            Function(_) => write!(f, "function"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -204,11 +249,9 @@ impl<'a> Scanner<'a> {
         }
         if self.peek() == 'i' {
             self.advance();
-            if is_float {
-                let lexeme = &self.input[self.start..self.current - 1];
-                let value = lexeme.parse::<f32>().unwrap();
-                self.push(Literal(Value::Im32(value)), Some(Value::Im32(value)));
-            }
+            let lexeme = &self.input[self.start..self.current - 1];
+            let value = lexeme.parse::<f32>().unwrap();
+            self.push(Literal(Value::Im32(value)), Some(Value::Im32(value)));
         } else {
             let lexeme = &self.input[self.start..self.current];
             let value = if is_float {
@@ -232,12 +275,11 @@ impl<'a> Scanner<'a> {
             self.advance();
         }
         let lexeme = &self.input[self.start..self.current];
-        let token_type = match lexeme {
-            "if" | "else" | "for" | "while" | "return" | "int" | "i16" | "i32" | "unt" | "u16"
-            | "u32" | "flt" | "f32" | "f64" | "bol" | "str" | "chr" | "nil" | "true" | "false" | "print" => {
-                Keyword(lexeme.to_string())
-            }
-            _ => Identifier,
+
+        let token_type = if KEYWORDS.contains(&lexeme) {
+            Keyword(lexeme.to_string())
+        } else {
+            Identifier
         };
         self.push(token_type, None);
     }

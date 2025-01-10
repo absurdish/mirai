@@ -30,11 +30,13 @@ impl<'a> Interpreter<'a> {
 
     pub fn statement(&mut self, stmt: Stmt<'a>) {
         match stmt {
-            Stmt::Print(e) => println!("{:?}", e.eval(Rc::clone(&self.memory))),
+            Stmt::Print(e) => println!("{}", e.eval(Rc::clone(&self.memory))),
             Stmt::Expr(e) => { e.eval(Rc::clone(&self.memory)); }
-            Stmt::Var { id, value, .. } => {
+            Stmt::Var { id, value, type_, .. } => {
                 let value = value.eval(Rc::clone(&self.memory));
-                self.memory.borrow_mut().set_stack_var(id.lexeme, value);
+                self.type_check(type_.token_type, &value);
+                let var_id = self.memory.borrow_mut().allocate_heap(value);
+                self.memory.borrow_mut().set_stack_var(id.lexeme, Value::HeapRef(var_id));
             }
             Stmt::Block { stmts, .. } => {
                 self.memory.borrow_mut().push_stack_frame();

@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::process::exit;
 use std::rc::Rc;
 use crate::core::memory::Memory;
 use crate::core::parser::Expr;
@@ -14,11 +15,40 @@ impl<'a> Expr<'a> {
             Expr::Binary { lhs, rhs, op, .. } => self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(Rc::clone(&mem))),
             Expr::Null => Value::Nil,
             Expr::Var { name, .. } => {
-                if let Some(val) = mem.borrow().get_stack_var(name.lexeme) {
+                let mut mem = RefCell::borrow_mut(&mem);
+                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
+                    let mut mem_clone = mem.clone();
+                    if let Some(heap_obj) = mem.borrow_heap(Rc::new(RefCell::new(mem_clone)), id) {
+                        let heap_value = RefCell::borrow(&heap_obj).clone();
+                        return heap_value.value;
+                    }
+                } else if let Some(val) = mem.get_stack_var(name.lexeme) {
                     return val;
                 }
                 Value::Nil
             }
+            Expr::Assign { name, value, .. } => {
+                let value = value.eval(Rc::clone(&mem));
+                let mut mem = RefCell::borrow_mut(&mem);
+                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
+                    let mut mem_clone = mem.clone();
+                    if let Some(heap_obj) = mem.borrow_heap(Rc::new(RefCell::new(mem_clone)), id) {
+                        let heap_value = RefCell::borrow(&heap_obj).clone();
+                        if !heap_value.value.clone().same_type(&value){
+                            eprintln!("type mismatch!");
+                            exit(0);
+                        }
+                    }
+
+                    let var_id = mem.allocate_heap(value.clone());
+                    mem.set_stack_var(name.lexeme, Value::HeapRef(var_id));
+                } else {
+                    eprintln!("variable `{}` not found", name.lexeme);
+                    exit(0);
+                }
+                value
+            }
+
             _ => unimplemented!(),
         }
     }

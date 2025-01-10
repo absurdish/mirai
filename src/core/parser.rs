@@ -245,6 +245,7 @@ impl<'a> Parser<'a> {
             DblChar(('+', '+')),
             DblChar(('-', '-')),
             SingleChar('-'),
+            SingleChar('&')
         ]) {
             let op = self.prev(1);
             let rhs = self.unary()?;
@@ -284,6 +285,16 @@ impl<'a> Parser<'a> {
         match token.token_type {
             Identifier => {
                 self.advance();
+
+                if self.match_token(SingleChar('=')) {
+                    let value = self.expr()?;
+                    return Ok(Expr::Assign {
+                        id: self.next_id(),
+                        name: token,
+                        value: Box::new(value),
+                    });
+                }
+
                 Ok(Expr::Var {
                     id: self.next_id(),
                     name: token,
@@ -343,6 +354,9 @@ impl<'a> Parser<'a> {
                 | "str"
                 | "chr"
                 | "nil"
+                | "im32"
+                | "im64"
+                | "im"
         )
     }
 
