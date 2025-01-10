@@ -13,30 +13,31 @@ impl<'a> Expr<'a> {
             eprintln!("argument count does not match parameter count.");
             exit(1);
         }
-        let mut mem = RefCell::borrow_mut(&mem).clone();
-        mem.push_stack_frame();
+        let mut meme = RefCell::borrow_mut(&mem).clone();
+        meme.push_stack_frame();
         for (i, (name, type_)) in func.params.iter().enumerate() {
-            let value = args[i].eval(Rc::new(RefCell::new(mem.clone())));
-            type_check(TokenType::Keyword(type_.to_string()), &value);
-            mem.set_stack_var(name, value)
+            let value = args[i].eval(Rc::clone(&mem));
+            type_check(TokenType::Keyword(type_), &value);
+            meme.set_stack_var(name, value)
         }
 
-        let mut int = Interpreter::new_with_memory(Rc::new(RefCell::new(mem.clone())));
+        let mut int = Interpreter::new_with_memory(Rc::clone(&mem));
         for (i, stmt) in func.body.iter().enumerate() {
             if i + 1 == func.body.len() {
                 // return this statement
                 if let Stmt::Expr(e) = stmt {
-                    let value = e.eval(Rc::new(RefCell::new(mem.clone())));
-                    type_check(TokenType::Keyword(func.type_.to_string()), &value);
+                    let value = e.eval(Rc::new(RefCell::new(meme.clone())));
+                    type_check(TokenType::Keyword(func.type_), &value);
                     return value;
                 } else {
                     eprintln!("function must end with an expression");
                     exit(1);
                 }
             }
-            int.statement(stmt.clone())
+            int.statement(stmt.clone());
         }
-        mem.pop_stack_frame();
+
+        meme.pop_stack_frame();
         Value::Nil
     }
 
@@ -50,44 +51,44 @@ impl<'a> Expr<'a> {
             Expr::Null => Value::Nil,
             Expr::Call { name, args, .. } => {
                 if let Value::Function(func) = name.eval(Rc::clone(&mem)) {
-                    return self.run_fn(func, args, mem);
+                    return self.run_fn(func, args, Rc::clone(&mem));
                 }
                 Value::Nil
             }
             Expr::Var { name, .. } => {
                 let mut mem = RefCell::borrow_mut(&mem);
                 if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
-                    let mut mem_clone = mem.clone();
-                    if let Some(heap_obj) = mem.borrow_heap(Rc::new(RefCell::new(mem_clone)), id) {
-                        let heap_value = RefCell::borrow(&heap_obj).clone();
-                        return heap_value.value;
+                    if let Some(heap_obj) = mem.heap.get(&id) {
+                        let heap_value = heap_obj.borrow();
+                        return heap_value.value.clone();
                     }
                 } else if let Some(val) = mem.get_stack_var(name.lexeme) {
                     return val;
                 }
                 Value::Nil
             }
+
             Expr::Assign { name, value, .. } => {
                 let value = value.eval(Rc::clone(&mem));
                 let mut mem = RefCell::borrow_mut(&mem);
-                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
-                    let mut mem_clone = mem.clone();
-                    if let Some(heap_obj) = mem.borrow_heap(Rc::new(RefCell::new(mem_clone)), id) {
-                        let heap_value = RefCell::borrow(&heap_obj).clone();
-                        if !heap_value.value.clone().same_type(&value) {
-                            eprintln!("type mismatch!");
-                            exit(0);
-                        }
-                    }
 
+                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
+                    if let Some(heap_obj) = mem.heap.get(&id) {
+                        let mut heap_value = heap_obj.borrow_mut();
+                        if !heap_value.value.same_type(&value) {
+                            eprintln!("type mismatch!");
+                            panic!("Type mismatch encountered!");
+                        }
+                        heap_value.value = value.clone();
+                    }
+                } else {
                     let var_id = mem.allocate_heap(value.clone());
                     mem.set_stack_var(name.lexeme, Value::HeapRef(var_id));
-                } else {
-                    eprintln!("variable `{}` not found", name.lexeme);
-                    exit(0);
                 }
+
                 value
             }
+
             _ => unimplemented!(),
         }
     }
@@ -97,7 +98,7 @@ impl<'a> Expr<'a> {
         match (op.lexeme, rhs) {
             // `-a`, minus unary operation
             ("-", &Value::Int(a)) => Value::Int(-a),
-            ("-", &Value::Int32(a)) => Value::Int32(-a),
+            ("-", &Value::Int64(a)) => Value::Int64(-a),
             ("-", &Value::Flt(a)) => Value::Flt(-a),
             ("-", &Value::F64(a)) => Value::F64(-a),
             ("-", &Value::Im32(a)) => Value::Im32(-a),
@@ -105,16 +106,16 @@ impl<'a> Expr<'a> {
             ("-", &Value::Bol(a)) => Value::Bol(!a),
             // `++a`, increment unary operation
             ("++", &Value::Int(a)) => Value::Int(a + 1),
-            ("++", &Value::Int32(a)) => Value::Int32(a + 1),
+            ("++", &Value::Int64(a)) => Value::Int64(a + 1),
             ("++", &Value::Flt(a)) => Value::Flt(a + 1.0),
             ("++", &Value::F64(a)) => Value::F64(a + 1.0),
             ("++", &Value::Im32(a)) => Value::Im32(a + 1.0),
             ("++", &Value::Im64(a)) => Value::Im64(a + 1.0),
             ("++", &Value::Unt(a)) => Value::Unt(a + 1),
-            ("++", &Value::Unt32(a)) => Value::Unt32(a + 1),
+            ("++", &Value::Unt64(a)) => Value::Unt64(a + 1),
             // `--a`, decrement unary operation
             ("--", &Value::Int(a)) => Value::Int(a - 1),
-            ("--", &Value::Int32(a)) => Value::Int32(a - 1),
+            ("--", &Value::Int64(a)) => Value::Int64(a - 1),
             ("--", &Value::Flt(a)) => Value::Flt(a - 1.0),
             ("--", &Value::F64(a)) => Value::F64(a - 1.0),
             ("--", &Value::Im32(a)) => Value::Im32(-a - 1.0),
@@ -125,11 +126,11 @@ impl<'a> Expr<'a> {
                 }
                 Value::Unt(a - 1)
             }
-            ("--", &Value::Unt32(a)) => {
+            ("--", &Value::Unt64(a)) => {
                 if a != 0 {
                     panic!("unsigned integers cannot be negative!")
                 }
-                Value::Unt32(a - 1)
+                Value::Unt64(a - 1)
             }
             //
             _ => unimplemented!(),
@@ -156,22 +157,39 @@ impl<'a> Expr<'a> {
             (Value::Int(a), "<=", Value::Int(b)) => Value::Bol(a <= b),
             (Value::Int(a), ">=", Value::Int(b)) => Value::Bol(a >= b),
             // binary operations of `i32`
-            (Value::Int32(a), "+", Value::Int32(b)) => Value::Int32(a + b),
-            (Value::Int32(a), "-", Value::Int32(b)) => Value::Int32(a - b),
-            (Value::Int32(a), "*", Value::Int32(b)) => Value::Int32(a * b),
-            (Value::Int32(a), "/", Value::Int32(b)) => {
+            (Value::Int64(a), "+", Value::Int64(b)) => Value::Int64(a + b),
+            (Value::Int64(a), "-", Value::Int64(b)) => Value::Int64(a - b),
+            (Value::Int64(a), "*", Value::Int64(b)) => Value::Int64(a * b),
+            (Value::Int64(a), "/", Value::Int64(b)) => {
                 if *b == 0 {
                     panic!("division by zero")
                 }
-                Value::Int32(a / b)
+                Value::Int64(a / b)
             }
-            (Value::Int32(a), "%", Value::Int32(b)) => Value::Int32(a % b),
-            (Value::Int32(a), ">", Value::Int32(b)) => Value::Bol(a > b),
-            (Value::Int32(a), "<", Value::Int32(b)) => Value::Bol(a < b),
-            (Value::Int32(a), "==", Value::Int32(b)) => Value::Bol(a == b),
-            (Value::Int32(a), "!=", Value::Int32(b)) => Value::Bol(a != b),
-            (Value::Int32(a), "<=", Value::Int32(b)) => Value::Bol(a <= b),
-            (Value::Int32(a), ">=", Value::Int32(b)) => Value::Bol(a >= b),
+            (Value::Int64(a), "%", Value::Int64(b)) => Value::Int64(a % b),
+            (Value::Int64(a), ">", Value::Int64(b)) => Value::Bol(a > b),
+            (Value::Int64(a), "<", Value::Int64(b)) => Value::Bol(a < b),
+            (Value::Int64(a), "==", Value::Int64(b)) => Value::Bol(a == b),
+            (Value::Int64(a), "!=", Value::Int64(b)) => Value::Bol(a != b),
+            (Value::Int64(a), "<=", Value::Int64(b)) => Value::Bol(a <= b),
+            (Value::Int64(a), ">=", Value::Int64(b)) => Value::Bol(a >= b),
+            //
+            (Value::Int64(a), "+", Value::Int(b)) => Value::Int64(a + *b as i64),
+            (Value::Int64(a), "-", Value::Int(b)) => Value::Int64(a - *b as i64),
+            (Value::Int64(a), "*", Value::Int(b)) => Value::Int64(a * *b as i64),
+            (Value::Int64(a), "/", Value::Int(b)) => {
+                if *b == 0 {
+                    panic!("division by zero")
+                }
+                Value::Int64(a / *b as i64)
+            }
+            (Value::Int64(a), "%", Value::Int(b)) => Value::Int64(a % *b as i64),
+            (Value::Int64(a), ">", Value::Int(b)) => Value::Bol(*a > *b as i64),
+            (Value::Int64(a), "<", Value::Int(b)) => Value::Bol(*a < *b as i64),
+            (Value::Int64(a), "==", Value::Int(b)) => Value::Bol(*a == *b as i64),
+            (Value::Int64(a), "!=", Value::Int(b)) => Value::Bol(*a != *b as i64),
+            (Value::Int64(a), "<=", Value::Int(b)) => Value::Bol(*a <= *b as i64),
+            (Value::Int64(a), ">=", Value::Int(b)) => Value::Bol(*a >= *b as i64),
             // binary operations of `unt`
             (Value::Unt(a), "+", Value::Unt(b)) => Value::Unt(a + b),
             (Value::Unt(a), "-", Value::Unt(b)) => Value::Unt(a - b),
@@ -190,22 +208,22 @@ impl<'a> Expr<'a> {
             (Value::Unt(a), "<=", Value::Unt(b)) => Value::Bol(a <= b),
             (Value::Unt(a), ">=", Value::Unt(b)) => Value::Bol(a >= b),
             // binary operations of `u32`
-            (Value::Unt32(a), "+", Value::Unt32(b)) => Value::Unt32(a + b),
-            (Value::Unt32(a), "-", Value::Unt32(b)) => Value::Unt32(a - b),
-            (Value::Unt32(a), "*", Value::Unt32(b)) => Value::Unt32(a * b),
-            (Value::Unt32(a), "/", Value::Unt32(b)) => {
+            (Value::Unt64(a), "+", Value::Unt64(b)) => Value::Unt64(a + b),
+            (Value::Unt64(a), "-", Value::Unt64(b)) => Value::Unt64(a - b),
+            (Value::Unt64(a), "*", Value::Unt64(b)) => Value::Unt64(a * b),
+            (Value::Unt64(a), "/", Value::Unt64(b)) => {
                 if *b == 0 {
                     panic!("division by zero")
                 }
-                Value::Unt32(a / b)
+                Value::Unt64(a / b)
             }
-            (Value::Unt32(a), "%", Value::Unt32(b)) => Value::Unt32(a % b),
-            (Value::Unt32(a), ">", Value::Unt32(b)) => Value::Bol(a > b),
-            (Value::Unt32(a), "<", Value::Unt32(b)) => Value::Bol(a < b),
-            (Value::Unt32(a), "==", Value::Unt32(b)) => Value::Bol(a == b),
-            (Value::Unt32(a), "!=", Value::Unt32(b)) => Value::Bol(a != b),
-            (Value::Unt32(a), "<=", Value::Unt32(b)) => Value::Bol(a <= b),
-            (Value::Unt32(a), ">=", Value::Unt32(b)) => Value::Bol(a >= b),
+            (Value::Unt64(a), "%", Value::Unt64(b)) => Value::Unt64(a % b),
+            (Value::Unt64(a), ">", Value::Unt64(b)) => Value::Bol(a > b),
+            (Value::Unt64(a), "<", Value::Unt64(b)) => Value::Bol(a < b),
+            (Value::Unt64(a), "==", Value::Unt64(b)) => Value::Bol(a == b),
+            (Value::Unt64(a), "!=", Value::Unt64(b)) => Value::Bol(a != b),
+            (Value::Unt64(a), "<=", Value::Unt64(b)) => Value::Bol(a <= b),
+            (Value::Unt64(a), ">=", Value::Unt64(b)) => Value::Bol(a >= b),
             // binary operations of `flt`
             (Value::Flt(a), "+", Value::Flt(b)) => Value::Flt(a + b),
             (Value::Flt(a), "-", Value::Flt(b)) => Value::Flt(a - b),
@@ -275,8 +293,9 @@ impl<'a> Expr<'a> {
             (Value::Im64(a), "<=", Value::Im64(b)) => Value::Bol(a <= b),
             (Value::Im64(a), ">=", Value::Im64(b)) => Value::Bol(a >= b),
             _ => {
-                println!("{:?} {} {:?}", lhs, op.lexeme, rhs);
-                unimplemented!()},
+                println!("{:?} {} {:?} isn't implemented", lhs, op.lexeme, rhs);
+                Value::Nil
+            }
         }
     }
 

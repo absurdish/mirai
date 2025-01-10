@@ -112,7 +112,7 @@ impl<'a> Parser<'a> {
     pub fn stmt(&mut self) -> Result<Stmt<'a>, ParserError> {
         let token = self.peek();
         match &token.token_type {
-            Keyword(k) => match k.as_str() {
+            Keyword(k) => match *k {
                 "if" => self.stmt_if(),
                 "while" => self.stmt_while(),
                 "break" => {
@@ -120,12 +120,12 @@ impl<'a> Parser<'a> {
                     Ok(Stmt::Break)
                 }
                 "print" => {
-                    self.consume(Keyword("print".to_string()))?;
+                    self.consume(Keyword("print"))?;
                     let expr = self.expr()?;
                     Ok(Stmt::Print(expr))
                 }
                 _ if self.is_type_kwd(k) => {
-                    let type_ = self.consume(Keyword(k.clone()))?;
+                    let type_ = self.consume(Keyword(k))?;
                     let name = self.consume(Identifier)?;
                     if self.check(&SingleChar('=')) {
                         self.stmt_var(name, type_)
@@ -133,7 +133,7 @@ impl<'a> Parser<'a> {
                         self.stmt_fn(name, type_)
                     }
                 }
-                _ => Err(ParserError::UnexpectedToken(k.clone())),
+                _ => Err(ParserError::UnexpectedToken(k.to_string())),
             },
             SingleChar(c) if *c == '{' => Ok(Stmt::Block {
                 stmts: self.stmt_block()?,
@@ -163,7 +163,7 @@ impl<'a> Parser<'a> {
         let mut params = Vec::with_capacity(4);
         while !self.check(&SingleChar(')')) {
             if self.is_type_kwd(self.peek().lexeme) {
-                let type_ = self.consume(Keyword(self.peek().lexeme.to_string()))?;
+                let type_ = self.consume(Keyword(self.peek().lexeme))?;
                 let param_name = self.consume(Identifier)?;
                 params.push((param_name, type_));
                 if !self.match_token(SingleChar(',')) {
@@ -186,10 +186,10 @@ impl<'a> Parser<'a> {
     }
 
     fn stmt_if(&mut self) -> Result<Stmt<'a>, ParserError> {
-        self.consume(Keyword("if".to_string()))?;
+        self.consume(Keyword("if"))?;
         let pred = self.expr()?;
         let body = self.stmt()?.into();
-        let else_b = if self.match_token(Keyword("else".to_string())) {
+        let else_b = if self.match_token(Keyword("else")) {
             Some(self.stmt()?.into())
         } else {
             None
@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
     }
 
     fn stmt_while(&mut self) -> Result<Stmt<'a>, ParserError> {
-        self.consume(Keyword("while".to_string()))?;
+        self.consume(Keyword("while"))?;
         let pred = self.expr()?;
         let body = self.stmt()?.into();
         Ok(Stmt::While { pred, body })
@@ -354,11 +354,11 @@ impl<'a> Parser<'a> {
         matches!(
             k,
             "int"
-                | "i16"
+                | "i64"
                 | "i32"
                 | "unt"
-                | "u16"
                 | "u32"
+                | "u64"
                 | "flt"
                 | "f32"
                 | "f64"
@@ -373,8 +373,9 @@ impl<'a> Parser<'a> {
     }
 
     pub fn next_id(&mut self) -> usize {
+        let id = self.id_counter;
         self.id_counter += 1;
-        self.id_counter - 1
+        id
     }
 
     pub fn check(&self, token_type: &TokenType) -> bool {
@@ -382,14 +383,15 @@ impl<'a> Parser<'a> {
             return false;
         }
 
-        let current_token = self.peek();
+        let current_token = &self.tokens[self.current];
         match token_type {
-            SingleChar(c) => current_token.lexeme == c.to_string(),
-            DblChar((c1, c2)) => current_token.lexeme == format!("{}{}", c1, c2),
-            Keyword(kw) => current_token.lexeme == *kw,
-            _ => current_token.token_type == *token_type,
+            SingleChar(c) => current_token.lexeme.chars().next() == Some(*c),
+            DblChar((c1, c2)) => current_token.lexeme == &format!("{}{}", c1, c2),
+            Keyword(kw) => &current_token.lexeme == kw,
+            _ => &current_token.token_type == token_type,
         }
     }
+
 
     pub fn consume(&mut self, token_type: TokenType) -> Result<Token<'a>, ParserError> {
         if self.check(&token_type) {
@@ -467,6 +469,7 @@ impl<'a> Parser<'a> {
         }
         false
     }
+
     pub fn match_any_token(&mut self, token_types: &[TokenType<'a>]) -> Option<TokenType<'a>> {
         for token_type in token_types {
             if self.match_token(token_type.clone()) {

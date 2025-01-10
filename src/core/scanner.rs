@@ -7,7 +7,7 @@ use crate::core::memory::Function;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType<'a> {
-    Keyword(String),
+    Keyword(&'a str),
     SingleChar(char),
     DblChar((char, char)),
     Identifier,
@@ -17,10 +17,10 @@ pub enum TokenType<'a> {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
-    Int(i16),
-    Int32(i32),
-    Unt(u16),
-    Unt32(u32),
+    Int(i32),
+    Int64(i64),
+    Unt(u32),
+    Unt64(u64),
     Flt(f32),
     F64(f64),
     Im32(f32),
@@ -36,9 +36,9 @@ impl<'a> Value<'a> {
     pub fn same_type(&self, v2: &Value) -> bool {
         match (self, v2) {
             (Int(_), Int(_)) => true,
-            (Int32(_), Int32(_)) => true,
+            (Int64(_), Int64(_)) => true,
             (Unt(_), Unt(_)) => true,
-            (Unt32(_), Unt32(_)) => true,
+            (Unt64(_), Unt64(_)) => true,
             (Flt(_), Flt(_)) => true,
             (F64(_), F64(_)) => true,
             (Im32(_), Im32(_)) => true,
@@ -56,9 +56,9 @@ impl<'a> Value<'a> {
     pub fn is_truthy(&self) -> bool {
         match self {
             Int(a) => *a != 0,
-            Int32(a) => *a != 0,
+            Int64(a) => *a != 0,
             Unt(a) => *a != 0,
-            Unt32(a) => *a != 0,
+            Unt64(a) => *a != 0,
             Flt(a) => *a != 0.0,
             F64(a) => *a != 0.0,
             Im32(a) => *a != 0.0,
@@ -75,9 +75,9 @@ impl std::fmt::Display for Value<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Int(i) => write!(f, "{}", i.blue()),
-            Int32(i) => write!(f, "{}", i.blue()),
+            Int64(i) => write!(f, "{}", i.blue()),
             Unt(i) => write!(f, "{}", i.blue()),
-            Unt32(i) => write!(f, "{}", i.blue()),
+            Unt64(i) => write!(f, "{}", i.blue()),
             Flt(i) => write!(f, "{}", i.blue()),
             F64(i) => write!(f, "{}", i.blue()),
             Bol(i) => write!(f, "{}", i.blue()),
@@ -281,10 +281,10 @@ impl<'a> Scanner<'a> {
                 }
             } else {
                 match lexeme.parse::<i32>() {
-                    Ok(lex) => Value::Int32(lex),
+                    Ok(lex) => Value::Int(lex),
                     _ => {
-                        let val = lexeme.parse::<i32>().unwrap();
-                        Int32(val)
+                        let val = lexeme.parse::<i64>().unwrap();
+                        Int64(val)
                     }
                 }
             };
@@ -299,16 +299,16 @@ impl<'a> Scanner<'a> {
         let lexeme = &self.input[self.start..self.current];
 
         let token_type = if KEYWORDS.contains(&lexeme) {
-            Keyword(lexeme.to_string())
+            Keyword(lexeme)
         } else {
             Identifier
         };
         self.push(token_type, None);
     }
-
     fn push(&mut self, token_type: TokenType<'a>, value: Option<Value<'a>>) {
+        // Avoid slicing the string multiple times
         let lexeme = &self.input[self.start..self.current];
-        let length = lexeme.chars().count();
+        let length = lexeme.len();
         self.tokens.push(Token {
             lexeme,
             token_type,

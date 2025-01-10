@@ -32,12 +32,11 @@ pub struct Memory<'a> {
     // next heap id
     pub next: usize,
 }
-
 impl<'a> Memory<'a> {
     // initializes memory instance
     pub fn new() -> Self {
         Memory {
-            stack: vec![Rc::new(RefCell::new(HashMap::new()))], // Global scope
+            stack: vec![Rc::new(RefCell::new(HashMap::new()))],
             heap: HashMap::new(),
             next: 0,
         }
@@ -60,9 +59,9 @@ impl<'a> Memory<'a> {
     /// sets a var in the current stack frame
     pub fn set_stack_var(&mut self, name: &'a str, value: Value<'a>) {
         if let Some(frame) = self.stack.last() {
-            if let Value::HeapRef(id) = value {
-                if let Some(obj) = self.heap.get(&id) {
-                    let heap_value = obj.borrow_mut();
+            if let Value::HeapRef(id) = &value {
+                if let Some(obj) = self.heap.get(id) {
+                    let mut heap_value = obj.borrow_mut();
                     if heap_value.borrowed_by.is_empty() {
                         frame.borrow_mut().insert(name, value);
                         return;
@@ -75,7 +74,6 @@ impl<'a> Memory<'a> {
         }
     }
 
-
     /// gets a vars value from the stack
     pub fn get_stack_var(&self, name: &'a str) -> Option<Value<'a>> {
         for frame in self.stack.iter().rev() {
@@ -86,13 +84,14 @@ impl<'a> Memory<'a> {
         None
     }
 
+    /// Retrieve a function from the stack or heap
     pub fn get_function(&self, name: &'a str) -> Option<Function<'a>> {
         for frame in self.stack.iter().rev() {
             if let Some(val) = frame.borrow().get(name) {
                 if let Value::HeapRef(id) = val {
                     if let Some(heap_obj) = self.heap.get(id) {
-                        if let Value::Function(func) = heap_obj.borrow().value.clone() {
-                            return Some(func);
+                        if let Value::Function(func) = &heap_obj.borrow().value {
+                            return Some(func.clone());
                         }
                     }
                 }
@@ -101,37 +100,41 @@ impl<'a> Memory<'a> {
         None
     }
 
-
-    /// allocates a val on the heap and returns a ref to it
+    /// allocates a value on the heap and returns a reference ID
     pub fn allocate_heap(&mut self, value: Value<'a>) -> usize {
         let id = self.next;
-        self.heap.insert(id, Rc::new(RefCell::new(HeapValue { value, owner: None, borrowed_by: vec![] })));
+        self.heap.insert(id, Rc::new(RefCell::new(HeapValue {
+            value,
+            owner: None,
+            borrowed_by: vec![],
+        })));
         self.next += 1;
         id
     }
 
-    /// borrows a heap object
+    /// borrows a heap object and ensures it can be accessed safely
     pub fn borrow_heap(&mut self, mem: Rc<RefCell<Memory<'a>>>, id: usize) -> Option<Rc<RefCell<HeapValue<'a>>>> {
         if let Some(obj) = self.heap.get(&id) {
             obj.borrow_mut().borrowed_by.push(Rc::clone(&mem));
-            return Some(Rc::clone(obj));
+            Some(Rc::clone(obj))
+        } else {
+            None
         }
-        None
     }
 
-    // returns a heap object
+    /// returns a heap object, removing the borrowing reference
     pub fn return_heap(&mut self, mem: Rc<RefCell<Memory<'a>>>, id: usize) {
         if let Some(obj) = self.heap.get_mut(&id) {
             obj.borrow_mut().borrowed_by.retain(|b| !Rc::ptr_eq(b, &mem));
         }
     }
 
-    // transfers ownership to the new owner
+    /// transfers ownership of a heap object to a new memory instance
     pub fn transfer_ownership(&mut self, id: usize, new_owner: Rc<RefCell<Memory<'a>>>) {
         if let Some(obj) = self.heap.get_mut(&id) {
             let mut heap_value = obj.borrow_mut();
             if heap_value.borrowed_by.is_empty() {
-                heap_value.owner = Some(new_owner);
+                heap_value.owner = Some(new_owner); // transfer ownership only if no borrowings
             } else {
                 eprintln!("cannot transfer ownership: Heap object is currently borrowed.");
                 exit(1);
@@ -139,19 +142,12 @@ impl<'a> Memory<'a> {
         }
     }
 
-    /// transfers ownership to a new memory
-    pub fn transfer_heap(&mut self, id: usize, new_owner: Rc<RefCell<Memory<'a>>>) {
-        if let Some(obj) = self.heap.get_mut(&id) {
-            obj.borrow_mut().owner = Some(new_owner);
-        }
-    }
-
-    // frees a heap object by id
+    /// frees a heap object by id, removing it from the heap
     pub fn free_heap(&mut self, id: usize) {
         self.heap.remove(&id);
     }
 
-    // adds a function to the memory
+    /// adds a function to the memory
     pub fn add_function(&mut self, name: &'a str, function: Function<'a>) {
         let id = self.allocate_heap(Value::Function(function));
         self.set_stack_var(name, Value::HeapRef(id));

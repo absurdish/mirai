@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
 use crate::core::memory::{Function, Memory};
-use crate::core::scanner::Value;
+use crate::core::scanner::{TokenType, Value};
 use crate::core::parser::Stmt;
 use crate::core::types::type_check;
 
@@ -35,8 +35,19 @@ impl<'a> Interpreter<'a> {
             Stmt::Print(e) => println!("{}", e.eval(Rc::clone(&self.memory))),
             Stmt::Expr(e) => { e.eval(Rc::clone(&self.memory)); }
             Stmt::Var { id, value, type_, .. } => {
-                let value = value.eval(Rc::clone(&self.memory));
-                type_check(type_.token_type, &value);
+                let mut value = value.eval(Rc::clone(&self.memory));
+                type_check(type_.token_type.clone(), &value);
+                if let TokenType::Keyword("i64") = type_.token_type {
+                    if let Value::Int(a) = value {
+                        value = Value::Int64(a as i64)
+                    }
+                } else if let TokenType::Keyword("u64") = type_.token_type {
+                    if let Value::Unt(a) = value {
+                        value = Value::Unt64(a as u64)
+                    }
+                }
+
+
                 let var_id = self.memory.borrow_mut().allocate_heap(value);
                 self.memory.borrow_mut().set_stack_var(id.lexeme, Value::HeapRef(var_id));
             }
