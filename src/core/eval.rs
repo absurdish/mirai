@@ -1,11 +1,45 @@
 use std::cell::RefCell;
 use std::process::exit;
 use std::rc::Rc;
-use crate::core::memory::Memory;
-use crate::core::parser::Expr;
-use crate::core::scanner::{Token, Value};
+use crate::core::interpreter::Interpreter;
+use crate::core::memory::{Function, Memory};
+use crate::core::parser::{Expr, Stmt};
+use crate::core::scanner::{Token, TokenType, Value};
+use crate::core::types::type_check;
 
 impl<'a> Expr<'a> {
+    pub fn run_fn(&self, func: Function<'a>, args: &Vec<Expr<'a>>, mem: Rc<RefCell<Memory<'a>>>) -> Value<'a> {
+        if args.len() != func.params.len() {
+            eprintln!("argument count does not match parameter count.");
+            exit(1);
+        }
+        let mut mem = RefCell::borrow_mut(&mem).clone();
+        mem.push_stack_frame();
+        for (i, (name, type_)) in func.params.iter().enumerate() {
+            let value = args[i].eval(Rc::new(RefCell::new(mem.clone())));
+            type_check(TokenType::Keyword(type_.to_string()), &value);
+            mem.set_stack_var(name, value)
+        }
+
+        let mut int = Interpreter::new_with_memory(Rc::new(RefCell::new(mem.clone())));
+        for (i, stmt) in func.body.iter().enumerate() {
+            if i + 1 == func.body.len() {
+                // return this statement
+                if let Stmt::Expr(e) = stmt {
+                    let value = e.eval(Rc::new(RefCell::new(mem.clone())));
+                    type_check(TokenType::Keyword(func.type_.to_string()), &value);
+                    return value;
+                } else {
+                    eprintln!("function must end with an expression");
+                    exit(1);
+                }
+            }
+            int.statement(stmt.clone())
+        }
+        mem.pop_stack_frame();
+        Value::Nil
+    }
+
     // evaluate expressions
     pub fn eval(&self, mem: Rc<RefCell<Memory<'a>>>) -> Value<'a> {
         match self {
@@ -14,6 +48,12 @@ impl<'a> Expr<'a> {
             Expr::Unary { rhs, op, .. } => self.eval_unary(op, &rhs.eval(Rc::clone(&mem))),
             Expr::Binary { lhs, rhs, op, .. } => self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(Rc::clone(&mem))),
             Expr::Null => Value::Nil,
+            Expr::Call { name, args, .. } => {
+                if let Value::Function(func) = name.eval(Rc::clone(&mem)) {
+                    return self.run_fn(func, args, mem);
+                }
+                Value::Nil
+            }
             Expr::Var { name, .. } => {
                 let mut mem = RefCell::borrow_mut(&mem);
                 if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
@@ -34,7 +74,7 @@ impl<'a> Expr<'a> {
                     let mut mem_clone = mem.clone();
                     if let Some(heap_obj) = mem.borrow_heap(Rc::new(RefCell::new(mem_clone)), id) {
                         let heap_value = RefCell::borrow(&heap_obj).clone();
-                        if !heap_value.value.clone().same_type(&value){
+                        if !heap_value.value.clone().same_type(&value) {
                             eprintln!("type mismatch!");
                             exit(0);
                         }
@@ -48,7 +88,6 @@ impl<'a> Expr<'a> {
                 }
                 value
             }
-
             _ => unimplemented!(),
         }
     }
@@ -109,6 +148,13 @@ impl<'a> Expr<'a> {
                 }
                 Value::Int(a / b)
             }
+            (Value::Int(a), "%", Value::Int(b)) => Value::Int(a % b),
+            (Value::Int(a), ">", Value::Int(b)) => Value::Bol(a > b),
+            (Value::Int(a), "<", Value::Int(b)) => Value::Bol(a < b),
+            (Value::Int(a), "==", Value::Int(b)) => Value::Bol(a == b),
+            (Value::Int(a), "!=", Value::Int(b)) => Value::Bol(a != b),
+            (Value::Int(a), "<=", Value::Int(b)) => Value::Bol(a <= b),
+            (Value::Int(a), ">=", Value::Int(b)) => Value::Bol(a >= b),
             // binary operations of `i32`
             (Value::Int32(a), "+", Value::Int32(b)) => Value::Int32(a + b),
             (Value::Int32(a), "-", Value::Int32(b)) => Value::Int32(a - b),
@@ -119,6 +165,13 @@ impl<'a> Expr<'a> {
                 }
                 Value::Int32(a / b)
             }
+            (Value::Int32(a), "%", Value::Int32(b)) => Value::Int32(a % b),
+            (Value::Int32(a), ">", Value::Int32(b)) => Value::Bol(a > b),
+            (Value::Int32(a), "<", Value::Int32(b)) => Value::Bol(a < b),
+            (Value::Int32(a), "==", Value::Int32(b)) => Value::Bol(a == b),
+            (Value::Int32(a), "!=", Value::Int32(b)) => Value::Bol(a != b),
+            (Value::Int32(a), "<=", Value::Int32(b)) => Value::Bol(a <= b),
+            (Value::Int32(a), ">=", Value::Int32(b)) => Value::Bol(a >= b),
             // binary operations of `unt`
             (Value::Unt(a), "+", Value::Unt(b)) => Value::Unt(a + b),
             (Value::Unt(a), "-", Value::Unt(b)) => Value::Unt(a - b),
@@ -129,6 +182,13 @@ impl<'a> Expr<'a> {
                 }
                 Value::Unt(a / b)
             }
+            (Value::Unt(a), "%", Value::Unt(b)) => Value::Unt(a % b),
+            (Value::Unt(a), ">", Value::Unt(b)) => Value::Bol(a > b),
+            (Value::Unt(a), "<", Value::Unt(b)) => Value::Bol(a < b),
+            (Value::Unt(a), "==", Value::Unt(b)) => Value::Bol(a == b),
+            (Value::Unt(a), "!=", Value::Unt(b)) => Value::Bol(a != b),
+            (Value::Unt(a), "<=", Value::Unt(b)) => Value::Bol(a <= b),
+            (Value::Unt(a), ">=", Value::Unt(b)) => Value::Bol(a >= b),
             // binary operations of `u32`
             (Value::Unt32(a), "+", Value::Unt32(b)) => Value::Unt32(a + b),
             (Value::Unt32(a), "-", Value::Unt32(b)) => Value::Unt32(a - b),
@@ -139,6 +199,13 @@ impl<'a> Expr<'a> {
                 }
                 Value::Unt32(a / b)
             }
+            (Value::Unt32(a), "%", Value::Unt32(b)) => Value::Unt32(a % b),
+            (Value::Unt32(a), ">", Value::Unt32(b)) => Value::Bol(a > b),
+            (Value::Unt32(a), "<", Value::Unt32(b)) => Value::Bol(a < b),
+            (Value::Unt32(a), "==", Value::Unt32(b)) => Value::Bol(a == b),
+            (Value::Unt32(a), "!=", Value::Unt32(b)) => Value::Bol(a != b),
+            (Value::Unt32(a), "<=", Value::Unt32(b)) => Value::Bol(a <= b),
+            (Value::Unt32(a), ">=", Value::Unt32(b)) => Value::Bol(a >= b),
             // binary operations of `flt`
             (Value::Flt(a), "+", Value::Flt(b)) => Value::Flt(a + b),
             (Value::Flt(a), "-", Value::Flt(b)) => Value::Flt(a - b),
@@ -149,6 +216,13 @@ impl<'a> Expr<'a> {
                 }
                 Value::Flt(a / b)
             }
+            (Value::Flt(a), "%", Value::Flt(b)) => Value::Flt(a % b),
+            (Value::Flt(a), ">", Value::Flt(b)) => Value::Bol(a > b),
+            (Value::Flt(a), "<", Value::Flt(b)) => Value::Bol(a < b),
+            (Value::Flt(a), "==", Value::Flt(b)) => Value::Bol(a == b),
+            (Value::Flt(a), "!=", Value::Flt(b)) => Value::Bol(a != b),
+            (Value::Flt(a), "<=", Value::Flt(b)) => Value::Bol(a <= b),
+            (Value::Flt(a), ">=", Value::Flt(b)) => Value::Bol(a >= b),
             // binary operations of `f64`
             (Value::F64(a), "+", Value::F64(b)) => Value::F64(a + b),
             (Value::F64(a), "-", Value::F64(b)) => Value::F64(a - b),
@@ -159,8 +233,50 @@ impl<'a> Expr<'a> {
                 }
                 Value::F64(a / b)
             }
-            //
-            _ => unimplemented!(),
+            (Value::F64(a), "%", Value::F64(b)) => Value::F64(a % b),
+            (Value::F64(a), ">", Value::F64(b)) => Value::Bol(a > b),
+            (Value::F64(a), "<", Value::F64(b)) => Value::Bol(a < b),
+            (Value::F64(a), "==", Value::F64(b)) => Value::Bol(a == b),
+            (Value::F64(a), "!=", Value::F64(b)) => Value::Bol(a != b),
+            (Value::F64(a), "<=", Value::F64(b)) => Value::Bol(a <= b),
+            (Value::F64(a), ">=", Value::F64(b)) => Value::Bol(a >= b),
+            // binary operations if `im`
+            (Value::Im32(a), "+", Value::Im32(b)) => Value::Im32(a + b),
+            (Value::Im32(a), "-", Value::Im32(b)) => Value::Im32(a - b),
+            (Value::Im32(a), "*", Value::Im32(b)) => Value::Flt(-a * b),
+            (Value::Im32(a), "/", Value::Im32(b)) => {
+                if *b == 0.0 {
+                    panic!("division by zero")
+                }
+                Value::Im32(a / b)
+            }
+            (Value::Im32(a), "%", Value::Im32(b)) => Value::Im32(a % b),
+            (Value::Im32(a), ">", Value::Im32(b)) => Value::Bol(a > b),
+            (Value::Im32(a), "<", Value::Im32(b)) => Value::Bol(a < b),
+            (Value::Im32(a), "!=", Value::Im32(b)) => Value::Bol(a != b),
+            (Value::Im32(a), "==", Value::Im32(b)) => Value::Bol(a == b),
+            (Value::Im32(a), "<=", Value::Im32(b)) => Value::Bol(a <= b),
+            (Value::Im32(a), ">=", Value::Im32(b)) => Value::Bol(a >= b),
+            // binary operations if `im64`
+            (Value::Im64(a), "+", Value::Im64(b)) => Value::Im64(a + b),
+            (Value::Im64(a), "-", Value::Im64(b)) => Value::Im64(a - b),
+            (Value::Im64(a), "*", Value::Im64(b)) => Value::Im64(a * b),
+            (Value::Im64(a), "/", Value::Im64(b)) => {
+                if *b == 0.0 {
+                    panic!("division by zero")
+                }
+                Value::Im64(a / b)
+            }
+            (Value::Im64(a), "%", Value::Im64(b)) => Value::Im64(a % b),
+            (Value::Im64(a), ">", Value::Im64(b)) => Value::Bol(a > b),
+            (Value::Im64(a), "<", Value::Im64(b)) => Value::Bol(a < b),
+            (Value::Im64(a), "!=", Value::Im64(b)) => Value::Bol(a != b),
+            (Value::Im64(a), "==", Value::Im64(b)) => Value::Bol(a == b),
+            (Value::Im64(a), "<=", Value::Im64(b)) => Value::Bol(a <= b),
+            (Value::Im64(a), ">=", Value::Im64(b)) => Value::Bol(a >= b),
+            _ => {
+                println!("{:?} {} {:?}", lhs, op.lexeme, rhs);
+                unimplemented!()},
         }
     }
 

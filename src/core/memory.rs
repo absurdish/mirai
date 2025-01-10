@@ -8,9 +8,10 @@ use crate::core::scanner::Value;
 /// represents a function stored in memory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Function<'a> {
-    name: &'a str,
-    params: Vec<&'a str>,
-    body: Rc<Vec<Stmt<'a>>>,
+    pub name: &'a str,
+    pub type_: &'a str,
+    pub params: Vec<(&'a str, &'a str)>,
+    pub body: Rc<Vec<Stmt<'a>>>,
 }
 
 
@@ -85,6 +86,22 @@ impl<'a> Memory<'a> {
         None
     }
 
+    pub fn get_function(&self, name: &'a str) -> Option<Function<'a>> {
+        for frame in self.stack.iter().rev() {
+            if let Some(val) = frame.borrow().get(name) {
+                if let Value::HeapRef(id) = val {
+                    if let Some(heap_obj) = self.heap.get(id) {
+                        if let Value::Function(func) = heap_obj.borrow().value.clone() {
+                            return Some(func);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+
     /// allocates a val on the heap and returns a ref to it
     pub fn allocate_heap(&mut self, value: Value<'a>) -> usize {
         let id = self.next;
@@ -135,12 +152,8 @@ impl<'a> Memory<'a> {
     }
 
     // adds a function to the memory
-    pub fn add_function(&mut self, name: &'a str, function: Function<'a>, to_heap: bool) {
-        if to_heap {
-            let id = self.allocate_heap(Value::Function(function));
-            self.set_stack_var(name, Value::HeapRef(id));
-        } else {
-            self.set_stack_var(name, Value::Function(function));
-        }
+    pub fn add_function(&mut self, name: &'a str, function: Function<'a>) {
+        let id = self.allocate_heap(Value::Function(function));
+        self.set_stack_var(name, Value::HeapRef(id));
     }
 }

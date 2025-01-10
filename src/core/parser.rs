@@ -62,6 +62,7 @@ pub enum Stmt<'a> {
         uses: Vec<&'a str>,
         is_all: bool,
     },
+    Break,
 }
 
 #[derive(Debug)]
@@ -114,6 +115,10 @@ impl<'a> Parser<'a> {
             Keyword(k) => match k.as_str() {
                 "if" => self.stmt_if(),
                 "while" => self.stmt_while(),
+                "break" => {
+                    self.advance();
+                    Ok(Stmt::Break)
+                }
                 "print" => {
                     self.consume(Keyword("print".to_string()))?;
                     let expr = self.expr()?;
@@ -226,6 +231,13 @@ impl<'a> Parser<'a> {
             SingleChar('-'),
             SingleChar('*'),
             SingleChar('/'),
+            SingleChar('>'),
+            SingleChar('<'),
+            SingleChar('%'),
+            DblChar(('>', '=')),
+            DblChar(('<', '=')),
+            DblChar(('=', '=')),
+            DblChar(('!', '='))
         ])
         {
             let op = self.prev(1);

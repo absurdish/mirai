@@ -1,3 +1,6 @@
+### iteration test
+
+```
 i32 sum = 0
 i32 i = 0
 
@@ -11,7 +14,6 @@ while i < 10000 {
 }
 
 print sum
-
-// 1000: 100ms
-// 5000: 2.6s
-// 10k: 32.7s
+```
+at iterations: `1k`, `5k`, `10k`
+- `0.0.2`: `100ms`, `2.6ms`, `32.7ms`

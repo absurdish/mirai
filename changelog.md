@@ -1,5 +1,10 @@
 # Changelog
 
+#### 0.0.2
+
+- added functions
+- added if and while statements
+- added comparative operators
 
 #### 0.0.1
 

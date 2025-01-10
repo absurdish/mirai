@@ -67,6 +67,18 @@ impl<'a> Resolver<'a> {
                 self.resolve_function(params, body, FuncType::Function);
             }
             Stmt::Print(expr) => self.resolve_expr(expr),
+            Stmt::If { pred, body, else_b } => {
+                self.resolve_expr(pred);
+                self.resolve_stmt(body);
+                if let Some(else_b) = else_b {
+                    self.resolve_stmt(else_b);
+                }
+            }
+            Stmt::While { pred, body } => {
+                self.resolve_expr(pred);
+                self.resolve_stmt(body);
+            }
+            Stmt::Break => {}
             _ => unimplemented!(),
         }
     }

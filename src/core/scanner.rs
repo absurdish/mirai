@@ -52,6 +52,22 @@ impl<'a> Value<'a> {
             _ => false,
         }
     }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Int(a) => *a != 0,
+            Int32(a) => *a != 0,
+            Unt(a) => *a != 0,
+            Unt32(a) => *a != 0,
+            Flt(a) => *a != 0.0,
+            F64(a) => *a != 0.0,
+            Im32(a) => *a != 0.0,
+            Im64(a) => *a != 0.0,
+            Str(s) => s.len() > 0,
+            Bol(b) => *b,
+            _ => false
+        }
+    }
 }
 use crate::core::scanner::Value::*;
 
@@ -133,7 +149,7 @@ impl<'a> Scanner<'a> {
     fn consume(&mut self) {
         let c = self.advance();
         match c {
-            '#' | '_' | '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '?' => {
+            '#' | '_' | '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '?' | '%' => {
                 self.push(SingleChar(c), None)
             }
             ':' | '&' | '|' | '<' | '>' | '!' | '\\' | '+' | '-' | '*' | '=' | '.' => {
@@ -177,6 +193,7 @@ impl<'a> Scanner<'a> {
             | ('-', '=')
             | ('*', '=')
             | ('=', '>')
+            | ('=', '=')
             | ('.', '.') => {
                 self.advance();
                 Some((c, next))
@@ -255,14 +272,19 @@ impl<'a> Scanner<'a> {
         } else {
             let lexeme = &self.input[self.start..self.current];
             let value = if is_float {
-                let val = lexeme.parse::<f32>().unwrap();
-                Value::Flt(val)
-            } else {
-                match lexeme.parse::<i16>() {
-                    Ok(lex) => Value::Int(lex),
+                match lexeme.parse::<f32>() {
+                    Ok(lex) => Value::Flt(lex),
                     _ => {
-                        let val = lexeme.parse::<i16>().unwrap();
-                        Value::Int(val)
+                        let val = lexeme.parse::<f64>().unwrap();
+                        F64(val)
+                    }
+                }
+            } else {
+                match lexeme.parse::<i32>() {
+                    Ok(lex) => Value::Int32(lex),
+                    _ => {
+                        let val = lexeme.parse::<i32>().unwrap();
+                        Int32(val)
                     }
                 }
             };
@@ -313,6 +335,6 @@ impl<'a> Scanner<'a> {
     }
 
     fn is_eof(&self) -> bool {
-        self.current >= self.input.len()
+        self.current >= self.input.len() || self.peek() == '\0'
     }
 }

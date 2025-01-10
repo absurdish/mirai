@@ -14,5 +14,5 @@ pub const C3: &'static str = "B784B7";
 
 pub const KEYWORDS: &[&str] = &[
     "if", "else", "for", "while", "return", "int", "i16", "i32", "unt", "u16",
-    "u32", "flt", "f32", "f64", "bol", "str", "chr", "nil", "print", "im32", "im64", "im"
+    "u32", "flt", "f32", "f64", "bol", "str", "chr", "nil", "print", "im32", "im64", "im", "break"
 ];

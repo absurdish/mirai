@@ -107,13 +107,13 @@ fn cmd_run(target: String, args: Vec<String>) {
                 let mut interpreter = Interpreter::new();
                 interpreter.start(stmts);
                 //
-                let mem = interpreter.memory.borrow();
-                let heap: HashMap<usize, Value> = mem.heap
-                    .iter()
-                    .map(|(i, f)| (*i, f.borrow().value.clone()))  // Borrowing the value and cloning it
-                    .collect();
-                println!("stack: {:?}", mem.stack);
-                println!("heap: {:?}", heap);
+                // let mem = interpreter.memory.borrow();
+                // let heap: HashMap<usize, Value> = mem.heap
+                //     .iter()
+                //     .map(|(i, f)| (*i, f.borrow().value.clone()))  // Borrowing the value and cloning it
+                //     .collect();
+                // println!("stack: {:?}", mem.stack);
+                // println!("heap: {:?}", heap);
             }
             Err(err) => {
                 println!(
