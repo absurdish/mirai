@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::core::parser::{Expr, Stmt};
 use crate::core::scanner::Token;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum VarState {
@@ -50,9 +50,7 @@ impl<'a> Resolver<'a> {
     /// resolve a statement
     pub fn resolve_stmt(&mut self, stmt: &Stmt<'a>) {
         match stmt {
-            Stmt::Var {
-                id, value, ..
-            } => {
+            Stmt::Var { id, value, .. } => {
                 let name = id.lexeme;
                 self.declare(name);
                 self.resolve_expr(value);
@@ -60,31 +58,63 @@ impl<'a> Resolver<'a> {
             }
             Stmt::Block { stmts, .. } => self.resolve_block(stmts),
             Stmt::Expr(expr) => self.resolve_expr(expr),
-            Stmt::Fn { id, params, body, .. } => {
+            Stmt::Fn {
+                id, params, body, ..
+            } => {
                 let name = id.lexeme;
                 self.declare(name);
                 self.define(name);
                 self.resolve_function(params, body, FuncType::Function);
             }
             Stmt::Print(expr) => self.resolve_expr(expr),
+            Stmt::Return(expr) => self.resolve_expr(expr),
             Stmt::If { pred, body, else_b } => {
                 self.resolve_expr(pred);
+                self.begin_scope();
                 self.resolve_stmt(body);
+                self.end_scope();
                 if let Some(else_b) = else_b {
+                    self.begin_scope();
                     self.resolve_stmt(else_b);
+                    self.end_scope();
                 }
             }
             Stmt::While { pred, body } => {
                 self.resolve_expr(pred);
+                self.begin_scope();
                 self.resolve_stmt(body);
+                self.end_scope();
             }
-            Stmt::Break => {}
+            Stmt::Method {
+                params, body, ..
+            } => {
+                // self.declare(id.lexeme);
+                // self.define(id.lexeme);
+                let mut encl_func = self.current_func.clone();
+                encl_func = FuncType::Method;
+                self.begin_scope();
+                self.declare("self");
+                self.define("self");
+                for param in params {
+                    self.declare(param.0);
+                    self.define(param.0);
+                }
+                self.resolve_block(body);
+                self.end_scope();
+                self.current_func = encl_func;
+            }
+            Stmt::Impl { .. } | Stmt::Break => {}
             _ => unimplemented!(),
         }
     }
 
     /// resolve a function declaration
-    pub fn resolve_function(&mut self, params: &Vec<(Token<'a>, Token<'a>)>, body: &Vec<Stmt<'a>>, func_type: FuncType) {
+    pub fn resolve_function(
+        &mut self,
+        params: &Vec<(Token<'a>, Token<'a>)>,
+        body: &Vec<Stmt<'a>>,
+        func_type: FuncType,
+    ) {
         let encl_func = self.current_func.clone();
         self.current_func = func_type;
 
@@ -102,7 +132,12 @@ impl<'a> Resolver<'a> {
     /// resolve an expression
     pub fn resolve_expr(&mut self, expr: &Expr<'a>) {
         match expr {
-            Expr::Var { name, id } => {
+            Expr::Var { name, id, method } => {
+                if let Some((_, es)) = method {
+                    for e in es {
+                        self.resolve_expr(e);
+                    }
+                }
                 self.resolve_local(*id, name.lexeme);
             }
             Expr::Assign { name, value, id } => {

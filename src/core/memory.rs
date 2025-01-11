@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::process::exit;
 use std::rc::Rc;
+use crate::core::env::Env;
 use crate::core::parser::Stmt;
 use crate::core::scanner::Value;
 
@@ -29,15 +30,19 @@ pub struct Memory<'a> {
     pub stack: Vec<Rc<RefCell<HashMap<&'a str, Value<'a>>>>>,
     // heap memory
     pub heap: HashMap<usize, Rc<RefCell<HeapValue<'a>>>>,
+    // environment
+    pub env: Env<'a>,
     // next heap id
-    pub next: usize,
+    next: usize,
 }
+
 impl<'a> Memory<'a> {
     // initializes memory instance
     pub fn new() -> Self {
         Memory {
             stack: vec![Rc::new(RefCell::new(HashMap::new()))],
             heap: HashMap::new(),
+            env: Env::new(),
             next: 0,
         }
     }
@@ -61,7 +66,7 @@ impl<'a> Memory<'a> {
         if let Some(frame) = self.stack.last() {
             if let Value::HeapRef(id) = &value {
                 if let Some(obj) = self.heap.get(id) {
-                    let mut heap_value = obj.borrow_mut();
+                    let heap_value = obj.borrow_mut();
                     if heap_value.borrowed_by.is_empty() {
                         frame.borrow_mut().insert(name, value);
                         return;

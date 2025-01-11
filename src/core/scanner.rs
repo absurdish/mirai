@@ -33,6 +33,24 @@ pub enum Value<'a> {
     Nil,
 }
 impl<'a> Value<'a> {
+    pub fn get_type(&self) -> &'a str {
+        match self {
+            Int(_) => "int",
+            Int64(_) => "i64",
+            Unt(_) => "unt",
+            Unt64(_) => "u64",
+            Flt(_) => "flt",
+            F64(_) => "f64",
+            Im32(_) => "im",
+            Im64(_) => "im64",
+            Str(_) => "str",
+            Chr(_) => "chr",
+            Bol(_) => "bol",
+            HeapRef(_) => "heap_ref",
+            Function(_) => "function",
+            Nil => "nil",
+        }
+    }
     pub fn same_type(&self, v2: &Value) -> bool {
         match (self, v2) {
             (Int(_), Int(_)) => true,
@@ -97,19 +115,15 @@ pub struct Token<'a> {
     pub lexeme: &'a str,
     pub token_type: TokenType<'a>,
     pub value: Option<Value<'a>>,
-    pub line: usize,
-    pub pos: usize,
     pub length: usize,
 }
 
 impl<'a> Token<'a> {
-    fn eof(line: usize) -> Self {
+    fn eof() -> Self {
         Token {
             lexeme: "\0",
             token_type: EoF,
             value: None,
-            line,
-            pos: 0,
             length: 0,
         }
     }
@@ -142,7 +156,7 @@ impl<'a> Scanner<'a> {
             self.start = self.current;
             self.consume();
         }
-        self.tokens.push(Token::eof(self.line));
+        self.tokens.push(Token::eof());
         &self.tokens
     }
 
@@ -313,8 +327,6 @@ impl<'a> Scanner<'a> {
             lexeme,
             token_type,
             value,
-            line: self.line,
-            pos: self.pos,
             length,
         });
         self.pos += length;

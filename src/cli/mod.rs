@@ -1,14 +1,9 @@
-use crate::{consts::*, core::parser::Parser as MirParser, core::scanner::Scanner};
+use crate::consts::*;
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
 use memmap2::Mmap;
 use std::{fs::File, path::Path};
-use std::collections::HashMap;
-use std::process::exit;
-use crate::core::interpreter::Interpreter;
-use crate::core::memory::HeapValue;
-use crate::core::resolver::Resolver;
-use crate::core::scanner::Value;
+use crate::core::run;
 
 mod core;
 mod linkers;
@@ -89,31 +84,10 @@ fn cmd_run(target: String, args: Vec<String>) {
     }
     match File::open(&target) {
         Ok(file) => match unsafe { Mmap::map(&file) } {
-            Ok(mmap) => {
+            Ok(map) => {
                 println!("{}", format!("running: {}", target).fg_hex(C2));
-                let input = std::str::from_utf8(&mmap).unwrap_or("<binary or invalid UTF-8>");
-                let mut scanner = Scanner::new(input);
-                let tokens = scanner.start();
-                let mut parser = MirParser::new(tokens);
-                let stmts = match parser.start() {
-                    Ok(stmts) => stmts,
-                    Err(err) => {
-                        eprintln!("{}", err);
-                        exit(0)
-                    }
-                };
-                let mut resolver = Resolver::new();
-                Resolver::resolve(&mut resolver, &stmts);
-                let mut interpreter = Interpreter::new();
-                interpreter.start(stmts);
-                //
-                // let mem = interpreter.memory.borrow();
-                // let heap: HashMap<usize, Value> = mem.heap
-                //     .iter()
-                //     .map(|(i, f)| (*i, f.borrow().value.clone()))  // Borrowing the value and cloning it
-                //     .collect();
-                // println!("stack: {:?}", mem.stack);
-                // println!("heap: {:?}", heap);
+                let input = std::str::from_utf8(&map).unwrap_or("<binary or invalid UTF-8>");
+                run(input);
             }
             Err(err) => {
                 println!(

@@ -1,30 +1,45 @@
-use std::cell::RefCell;
-use std::process::exit;
-use std::rc::Rc;
+use crate::core::env::Method;
 use crate::core::interpreter::Interpreter;
 use crate::core::memory::{Function, Memory};
 use crate::core::parser::{Expr, Stmt};
 use crate::core::scanner::{Token, TokenType, Value};
 use crate::core::types::type_check;
+use coloredpp::Colorize;
+use std::cell::RefCell;
+use std::process::exit;
+use std::rc::Rc;
 
 impl<'a> Expr<'a> {
-    pub fn run_fn(&self, func: Function<'a>, args: &Vec<Expr<'a>>, mem: Rc<RefCell<Memory<'a>>>) -> Value<'a> {
+    pub fn run_fn(
+        &self,
+        func: Function<'a>,
+        args: &[Expr<'a>],
+        mem: Rc<RefCell<Memory<'a>>>,
+    ) -> Value<'a> {
         if args.len() != func.params.len() {
             eprintln!("argument count does not match parameter count.");
             exit(1);
         }
-        let mut meme = RefCell::borrow_mut(&mem).clone();
+
+        let mut meme = mem.borrow_mut().clone();
         meme.push_stack_frame();
+
         for (i, (name, type_)) in func.params.iter().enumerate() {
             let value = args[i].eval(Rc::clone(&mem));
             type_check(TokenType::Keyword(type_), &value);
-            meme.set_stack_var(name, value)
+            meme.set_stack_var(name, value);
         }
 
         let mut int = Interpreter::new_with_memory(Rc::clone(&mem));
+
         for (i, stmt) in func.body.iter().enumerate() {
+            if let Some(val) = mem.borrow().env.specials.get("return").cloned() {
+                let value = val.eval(Rc::new(RefCell::new(meme.clone())));
+                type_check(TokenType::Keyword(func.type_), &value);
+                return value;
+            }
+
             if i + 1 == func.body.len() {
-                // return this statement
                 if let Stmt::Expr(e) = stmt {
                     let value = e.eval(Rc::new(RefCell::new(meme.clone())));
                     type_check(TokenType::Keyword(func.type_), &value);
@@ -33,6 +48,11 @@ impl<'a> Expr<'a> {
                     eprintln!("function must end with an expression");
                     exit(1);
                 }
+            } else if let Stmt::Return(e) = stmt {
+                let value = e.eval(Rc::new(RefCell::new(meme.clone())));
+                type_check(TokenType::Keyword(func.type_), &value);
+                meme.pop_stack_frame();
+                return value;
             }
             int.statement(stmt.clone());
         }
@@ -47,7 +67,9 @@ impl<'a> Expr<'a> {
             Expr::Value { value, .. } => value.clone(),
             Expr::Grouping { expr, .. } => expr.eval(Rc::clone(&mem)),
             Expr::Unary { rhs, op, .. } => self.eval_unary(op, &rhs.eval(Rc::clone(&mem))),
-            Expr::Binary { lhs, rhs, op, .. } => self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(Rc::clone(&mem))),
+            Expr::Binary { lhs, rhs, op, .. } => {
+                self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(Rc::clone(&mem)))
+            }
             Expr::Null => Value::Nil,
             Expr::Call { name, args, .. } => {
                 if let Value::Function(func) = name.eval(Rc::clone(&mem)) {
@@ -55,16 +77,51 @@ impl<'a> Expr<'a> {
                 }
                 Value::Nil
             }
-            Expr::Var { name, .. } => {
+            Expr::Var { name, method, .. } => {
                 let mut mem = RefCell::borrow_mut(&mem);
                 if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
                     if let Some(heap_obj) = mem.heap.get(&id) {
                         let heap_value = heap_obj.borrow();
-                        return heap_value.value.clone();
+                        let return_value = heap_value.value.clone();
+                        //
+                        if let Some((method_name, methods)) = method {
+                            let mut memes = mem.clone();
+                            let method: Method = match memes.env.get_method(return_value.get_type())
+                            {
+                                Some(method) => method.clone(),
+                                None => {
+                                    eprintln!("no method '{}' was found", method_name);
+                                    exit(1);
+                                }
+                            };
+
+                            let mut args = methods.clone();
+                            args.insert(
+                                0,
+                                Expr::Value {
+                                    value: return_value,
+                                    id: self.extract_id(),
+                                },
+                            );
+                            return self.run_fn(
+                                Function {
+                                    name: method.name,
+                                    params: method.params,
+                                    body: method.body,
+                                    type_: method.type_,
+                                },
+                                &args,
+                                Rc::new(RefCell::new(mem.clone())),
+                            );
+                        }
+                        //
+                        return return_value;
                     }
                 } else if let Some(val) = mem.get_stack_var(name.lexeme) {
+                    //
                     return val;
                 }
+                eprintln!("no variable {} was found in the memory", name.lexeme.red());
                 Value::Nil
             }
 
@@ -76,7 +133,6 @@ impl<'a> Expr<'a> {
                     if let Some(heap_obj) = mem.heap.get(&id) {
                         let mut heap_value = heap_obj.borrow_mut();
                         if !heap_value.value.same_type(&value) {
-                            eprintln!("type mismatch!");
                             panic!("Type mismatch encountered!");
                         }
                         heap_value.value = value.clone();
@@ -293,7 +349,7 @@ impl<'a> Expr<'a> {
             (Value::Im64(a), "<=", Value::Im64(b)) => Value::Bol(a <= b),
             (Value::Im64(a), ">=", Value::Im64(b)) => Value::Bol(a >= b),
             _ => {
-                println!("{:?} {} {:?} isn't implemented", lhs, op.lexeme, rhs);
+                // println!("{:?} {} {:?} isn't implemented", lhs, op.lexeme, rhs);
                 Value::Nil
             }
         }
@@ -302,13 +358,13 @@ impl<'a> Expr<'a> {
     // extract id from the expression
     pub fn extract_id(&self) -> usize {
         match self {
-            Expr::Value { id, .. } |
-            Expr::Call { id, .. } |
-            Expr::Assign { id, .. } |
-            Expr::Var { id, .. } |
-            Expr::Unary { id, .. } |
-            Expr::Binary { id, .. } |
-            Expr::Grouping { id, .. } => *id,
+            Expr::Value { id, .. }
+            | Expr::Call { id, .. }
+            | Expr::Assign { id, .. }
+            | Expr::Var { id, .. }
+            | Expr::Unary { id, .. }
+            | Expr::Binary { id, .. }
+            | Expr::Grouping { id, .. } => *id,
             _ => unimplemented!(),
         }
     }

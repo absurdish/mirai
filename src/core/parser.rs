@@ -1,5 +1,8 @@
 use crate::core::scanner::{Value, Token, TokenType::{self, *}};
 use std::fmt;
+use std::process::exit;
+use std::rc::Rc;
+use crate::core::env::{ApplyKind, Method};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'a> {
@@ -8,7 +11,11 @@ pub enum Expr<'a> {
         name: Token<'a>,
         value: Box<Expr<'a>>,
     },
-    Var { id: usize, name: Token<'a> },
+    Var {
+        id: usize,
+        name: Token<'a>,
+        method: Option<(&'a str, Vec<Expr<'a>>)>,
+    },
     Call { id: usize, name: Box<Expr<'a>>, args: Vec<Expr<'a>> },
     Unary { id: usize, op: Token<'a>, rhs: Box<Expr<'a>> },
     Binary { id: usize, op: Token<'a>, lhs: Box<Expr<'a>>, rhs: Box<Expr<'a>> },
@@ -41,6 +48,16 @@ pub enum Stmt<'a> {
         params: Vec<(Token<'a>, Token<'a>)>,
         is_pub: bool,
         rules: &'a [&'a str],
+    },
+    Method {
+        id: Token<'a>,
+        type_: Token<'a>,
+        params: Vec<(&'a str, &'a str)>,
+        body: Vec<Stmt<'a>>,
+    },
+    Impl {
+        name: Token<'a>,
+        body: Vec<Method<'a>>,
     },
     Block {
         stmts: Vec<Stmt<'a>>,
@@ -115,14 +132,33 @@ impl<'a> Parser<'a> {
             Keyword(k) => match *k {
                 "if" => self.stmt_if(),
                 "while" => self.stmt_while(),
+                "impl" => self.stmt_impl(),
                 "break" => {
                     self.advance();
                     Ok(Stmt::Break)
+                }
+                "self" => {
+                    self.advance();
+                    Ok(Stmt::Expr(Expr::Var {
+                        id: self.id_counter,
+                        name: Token {
+                            lexeme: "self",
+                            token_type: Keyword("self"),
+                            value: None,
+                            length: 4,
+                        },
+                        method: None,
+                    }))
                 }
                 "print" => {
                     self.consume(Keyword("print"))?;
                     let expr = self.expr()?;
                     Ok(Stmt::Print(expr))
+                }
+                "return" => {
+                    self.consume(Keyword("return"))?;
+                    let expr = self.expr()?;
+                    Ok(Stmt::Return(expr))
                 }
                 _ if self.is_type_kwd(k) => {
                     let type_ = self.consume(Keyword(k))?;
@@ -184,6 +220,46 @@ impl<'a> Parser<'a> {
             rules: &[],
         })
     }
+    fn stmt_method(&mut self) -> Option<Method<'a>> {
+        if let Keyword(k) = self.peek().token_type {
+            if self.is_type_kwd(k) {
+                let type_ = self.consume(Keyword(self.peek().lexeme)).unwrap();
+                let name = self.consume(Identifier).unwrap();
+                let _ = self.consume(SingleChar('('));
+                let mut params = Vec::with_capacity(4);
+                params.push(("self", type_.lexeme));
+                while !self.check(&SingleChar(')')) {
+                    if self.is_type_kwd(self.peek().lexeme) {
+                        let type_ = self.consume(Keyword(self.peek().lexeme)).unwrap();
+                        let param_name = self.consume(Identifier).unwrap();
+                        params.push((param_name.lexeme, type_.lexeme));
+                        if !self.match_token(SingleChar(',')) {
+                            break;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                let _ = self.consume(SingleChar(')'));
+                let body = match self.stmt_block() {
+                    Ok(v) => v,
+                    Err(err) => {
+                        println!("{}", err);
+                        exit(1);
+                    }
+                };
+                return Some(Method {
+                    name: name.lexeme,
+                    // temporal solution
+                    applies: ApplyKind::Normal(type_.lexeme),
+                    type_: type_.lexeme,
+                    params,
+                    body: Rc::new(body),
+                });
+            }
+        }
+        None
+    }
 
     fn stmt_if(&mut self) -> Result<Stmt<'a>, ParserError> {
         self.consume(Keyword("if"))?;
@@ -202,6 +278,27 @@ impl<'a> Parser<'a> {
         let pred = self.expr()?;
         let body = self.stmt()?.into();
         Ok(Stmt::While { pred, body })
+    }
+
+    fn stmt_impl(&mut self) -> Result<Stmt<'a>, ParserError> {
+        self.consume(Keyword("impl"))?;
+        let mut name = None;
+        if let Keyword(k) = self.peek().token_type {
+            if self.is_type_kwd(k) {
+                name = Some(self.consume(Keyword(self.peek().lexeme))?);
+            }
+        }
+        let name = name.unwrap();
+
+        self.consume(SingleChar('{'))?;
+        let mut methods = Vec::with_capacity(4);
+        while !self.check(&SingleChar('}')) && !self.is_at_end() {
+            if let Some(method) = self.stmt_method() {
+                methods.push(method);
+            }
+        }
+        self.consume(SingleChar('}'))?;
+        Ok(Stmt::Impl { name, body: methods })
     }
 
     fn stmt_block(&mut self) -> Result<Vec<Stmt<'a>>, ParserError> {
@@ -307,9 +404,30 @@ impl<'a> Parser<'a> {
                     });
                 }
 
+                let mut names = None;
+                let mut args = Vec::with_capacity(2);
+                if self.match_token(SingleChar('.')) {
+                    let name = self.consume(Identifier)?;
+                    names = Some(name);
+                    self.consume(SingleChar('('))?;
+                    while !self.check(&SingleChar(')')) {
+                        let arg = self.expr()?;
+                        args.push(arg);
+                        if !self.match_token(SingleChar(',')) {
+                            break;
+                        }
+                    }
+                    self.consume(SingleChar(')'))?;
+                }
+                let method: Option<(&'a str, Vec<Expr>)> = if let Some(name) = names {
+                    Some((name.lexeme, args.clone()))
+                } else {
+                    None
+                };
                 Ok(Expr::Var {
                     id: self.next_id(),
                     name: token,
+                    method,
                 })
             }
             SingleChar('(') => {
@@ -445,9 +563,7 @@ impl<'a> Parser<'a> {
         Token {
             token_type: EoF,
             lexeme: "\0",
-            line: 0,
             value: None,
-            pos: 0,
             length: 0,
         }
     }

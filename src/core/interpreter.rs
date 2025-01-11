@@ -1,10 +1,10 @@
+use crate::core::memory::{Function, Memory};
+use crate::core::parser::{Expr, Stmt};
+use crate::core::scanner::{TokenType, Value};
+use crate::core::types::type_check;
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
-use crate::core::memory::{Function, Memory};
-use crate::core::scanner::{TokenType, Value};
-use crate::core::parser::Stmt;
-use crate::core::types::type_check;
 
 #[derive(Debug)]
 pub struct Interpreter<'a> {
@@ -33,8 +33,12 @@ impl<'a> Interpreter<'a> {
     pub fn statement(&mut self, stmt: Stmt<'a>) {
         match stmt {
             Stmt::Print(e) => println!("{}", e.eval(Rc::clone(&self.memory))),
-            Stmt::Expr(e) => { e.eval(Rc::clone(&self.memory)); }
-            Stmt::Var { id, value, type_, .. } => {
+            Stmt::Expr(e) => {
+                e.eval(Rc::clone(&self.memory));
+            }
+            Stmt::Var {
+                id, value, type_, ..
+            } => {
                 let mut value = value.eval(Rc::clone(&self.memory));
                 type_check(type_.token_type.clone(), &value);
                 if let TokenType::Keyword("i64") = type_.token_type {
@@ -47,17 +51,35 @@ impl<'a> Interpreter<'a> {
                     }
                 }
 
-
                 let var_id = self.memory.borrow_mut().allocate_heap(value);
-                self.memory.borrow_mut().set_stack_var(id.lexeme, Value::HeapRef(var_id));
+                self.memory
+                    .borrow_mut()
+                    .set_stack_var(id.lexeme, Value::HeapRef(var_id));
             }
-            Stmt::Fn { id, params, body, type_, .. } => {
-                self.memory.borrow_mut().add_function(id.lexeme, Function {
-                    name: id.lexeme,
-                    type_: type_.lexeme,
-                    params: params.iter().map(|(a, b)| (a.lexeme, b.lexeme)).collect(),
-                    body: Rc::new(body),
-                });
+            Stmt::Fn {
+                id,
+                params,
+                body,
+                type_,
+                ..
+            } => {
+                self.memory.borrow_mut().add_function(
+                    id.lexeme,
+                    Function {
+                        name: id.lexeme,
+                        type_: type_.lexeme,
+                        params: params.iter().map(|(a, b)| (a.lexeme, b.lexeme)).collect(),
+                        body: Rc::new(body),
+                    },
+                );
+            }
+            Stmt::Impl { name, body } => {
+                for method in body {
+                    self.memory
+                        .borrow_mut()
+                        .env
+                        .define_method(name.lexeme, method)
+                }
             }
             Stmt::Block { stmts, .. } => {
                 self.memory.borrow_mut().push_stack_frame();
@@ -68,6 +90,7 @@ impl<'a> Interpreter<'a> {
             }
             Stmt::If { pred, body, else_b } => {
                 let is_truthy = pred.eval(Rc::clone(&self.memory)).is_truthy();
+
                 if is_truthy {
                     self.statement(*body);
                 } else if !pred.eval(Rc::clone(&self.memory)).is_truthy() && else_b.is_some() {
@@ -75,21 +98,37 @@ impl<'a> Interpreter<'a> {
                 }
             }
             Stmt::While { pred, body } => {
-                while pred.eval(Rc::clone(&self.memory)).is_truthy() {
+                let mut pred_val = pred.eval(Rc::clone(&self.memory));
+
+                while pred_val.is_truthy() {
                     if let Stmt::Block { stmts, .. } = body.deref() {
                         for stmt in stmts {
                             self.statement(stmt.clone());
-                            if let Stmt::Break = stmt.deref() {
+                            if let Stmt::Break = stmt {
                                 return;
                             }
                         }
                     } else {
+                        if self.memory.borrow().env.specials.contains_key("break") {
+                            return;
+                        }
                         self.statement(*body.clone());
                     }
+                    pred_val = pred.eval(Rc::clone(&self.memory));
                 }
             }
-            Stmt::Break => {}
-            _ => unimplemented!()
+
+            Stmt::Break => {
+                self.memory
+                    .borrow_mut()
+                    .env
+                    .specials
+                    .insert("break", Expr::Null);
+            }
+            Stmt::Return(e) => {
+                self.memory.borrow_mut().env.specials.insert("return", e);
+            }
+            _ => unimplemented!(),
         }
     }
 }

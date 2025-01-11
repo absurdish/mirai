@@ -1,5 +1,11 @@
 # Changelog
 
+#### 0.0.4
+
+- added `impl` and methods
+- added `return` in the functions
+- fixed `break` in nested statements
+
 #### 0.0.3
 
 - significant optimizations (44-1000x faster)
