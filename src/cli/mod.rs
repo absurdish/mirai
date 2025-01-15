@@ -1,15 +1,11 @@
+use crate::cli::run::cmd_run;
 use crate::consts::*;
+use crate::throw;
 use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
 use coloredpp::Colorize;
-use memmap2::Mmap;
-use std::{fs::File, path::Path};
-use crate::core::run;
 
-mod core;
-mod linkers;
-mod music;
-mod packman;
-mod play;
+mod run;
+mod utils;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None, color = clap::ColorChoice::Always)]
@@ -33,79 +29,24 @@ enum Cmds {
 }
 
 pub fn cli() {
+    // parse the input
     let cli = Cli::parse();
 
     if let Some(command) = cli.command {
+        // handle known commands
         match command {
             Cmds::Run { target, args } => cmd_run(target, args),
             Cmds::Version => cmd_version(),
         }
     } else {
+        // handle unknown/invalid commands
         let args: Vec<String> = std::env::args().collect();
         if args.len() > 1 {
             let input_command = &args[1];
-            let error = Cli::command().error(
-                ErrorKind::UnknownArgument,
-                format!("unknown command '{}'", input_command),
-            );
-            println!("{}", error.to_string().red());
+            throw!(format!("unknown command '{}'", input_command));
         } else {
-            println!(
-                "{}",
-                "no command provided. try 'mirai --help' for usage.".red()
-            );
+            throw!("no command provided. try 'mirai --help' for usage.")
         }
-    }
-}
-
-/// `mirai run <target> [args]`
-fn cmd_run(target: String, args: Vec<String>) {
-    let valid_extensions = ["mirai", "mir", "mr"];
-    let path = Path::new(&target);
-
-    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-        if !valid_extensions.contains(&extension) {
-            println!(
-                "{}",
-                format!(
-                    "error: '{}' has an invalid extension. Allowed: .mirai, .mir, .mr",
-                    target
-                )
-                    .red()
-            );
-            return;
-        }
-    } else {
-        println!(
-            "{}",
-            format!("error: '{}' is not a valid file.", target).red()
-        );
-        return;
-    }
-    match File::open(&target) {
-        Ok(file) => match unsafe { Mmap::map(&file) } {
-            Ok(map) => {
-                println!("{}", format!("running: {}", target).fg_hex(C2));
-                let input = std::str::from_utf8(&map).unwrap_or("<binary or invalid UTF-8>");
-                run(input);
-            }
-            Err(err) => {
-                println!(
-                    "{}",
-                    format!("error: failed to memory-map file '{}': {}", target, err).red()
-                );
-            }
-        },
-        Err(err) => {
-            println!(
-                "{}",
-                format!("error: failed to read file '{}': {}", target, err).red()
-            );
-        }
-    }
-
-    if !args.is_empty() {
-        println!("{}", format!("arguments: {:?}", args).fg_hex(C3));
     }
 }
 

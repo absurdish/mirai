@@ -1,14 +1,13 @@
 i64 sum = 0
 i64 i = 0
-int j = 0
+
+i64 add(i64 a, i64 b) {
+    a + b
+}
 
 while i < 10000 {
-    while j < 1000 {
-        sum = sum + i + j
-        j = 1 + j
-    }
+    sum = add(sum, i)
     i = i + 1
-    j = 0
 }
 
 print sum

@@ -160,6 +160,7 @@ impl<'a> Scanner<'a> {
         &self.tokens
     }
 
+    #[inline(always)]
     fn consume(&mut self) {
         let c = self.advance();
         match c {
@@ -184,6 +185,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
     fn handle_operator(&mut self, c: char) {
         if let Some(dbl_char) = self.match_double_char(c) {
             self.push(DblChar(dbl_char), None);
@@ -192,6 +194,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
     fn match_double_char(&mut self, c: char) -> Option<(char, char)> {
         let next = self.peek();
         match (c, next) {
@@ -257,11 +260,11 @@ impl<'a> Scanner<'a> {
         if lexeme.len() == 1 {
             let val = lexeme.chars().next().unwrap_or('\0');
             self.push(
-                Literal(Value::Chr(val)),
-                Some(Value::Chr(val)),
+                Literal(Chr(val)),
+                Some(Chr(val)),
             );
         } else {
-            let val = Value::Str(lexeme.to_string());
+            let val = Str(lexeme.to_string());
             self.push(Literal(val.clone()), Some(val));
         }
     }
@@ -282,12 +285,12 @@ impl<'a> Scanner<'a> {
             self.advance();
             let lexeme = &self.input[self.start..self.current - 1];
             let value = lexeme.parse::<f32>().unwrap();
-            self.push(Literal(Value::Im32(value)), Some(Value::Im32(value)));
+            self.push(Literal(Im32(value)), Some(Im32(value)));
         } else {
             let lexeme = &self.input[self.start..self.current];
             let value = if is_float {
                 match lexeme.parse::<f32>() {
-                    Ok(lex) => Value::Flt(lex),
+                    Ok(lex) => Flt(lex),
                     _ => {
                         let val = lexeme.parse::<f64>().unwrap();
                         F64(val)
@@ -295,7 +298,7 @@ impl<'a> Scanner<'a> {
                 }
             } else {
                 match lexeme.parse::<i32>() {
-                    Ok(lex) => Value::Int(lex),
+                    Ok(lex) => Int(lex),
                     _ => {
                         let val = lexeme.parse::<i64>().unwrap();
                         Int64(val)
@@ -319,8 +322,9 @@ impl<'a> Scanner<'a> {
         };
         self.push(token_type, None);
     }
+
+    #[inline(always)]
     fn push(&mut self, token_type: TokenType<'a>, value: Option<Value<'a>>) {
-        // Avoid slicing the string multiple times
         let lexeme = &self.input[self.start..self.current];
         let length = lexeme.len();
         self.tokens.push(Token {
@@ -332,20 +336,23 @@ impl<'a> Scanner<'a> {
         self.pos += length;
     }
 
-    fn advance(&mut self) -> char {
+    #[inline]    #[inline(always)]    fn advance(&mut self) -> char {
         let c = self.peek();
         self.current += c.len_utf8();
         c
     }
 
+    #[inline(always)]
     fn peek(&self) -> char {
         self.input[self.current..].chars().next().unwrap_or('\0')
     }
 
+    #[inline(always)]
     fn peek_next(&self) -> char {
         self.input[self.current..].chars().nth(1).unwrap_or('\0')
     }
 
+    #[inline(always)]
     fn is_eof(&self) -> bool {
         self.current >= self.input.len() || self.peek() == '\0'
     }
