@@ -20,6 +20,7 @@ pub struct Method<'a> {
     pub body: Rc<Vec<Stmt<'a>>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Env<'a> {
     // linked std paths, files, packages, ...

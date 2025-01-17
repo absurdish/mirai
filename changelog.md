@@ -1,5 +1,11 @@
 # Changelog
 
+#### 0.0.5
+
+- implemented loop and function optimizations
+- optimized the code in general
+- migrated development to linux
+
 #### 0.0.4
 
 - added `impl` and methods

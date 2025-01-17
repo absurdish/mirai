@@ -1,9 +1,9 @@
-use coloredpp::Colorize;
-use unicode_xid::UnicodeXID;
-use TokenType::*;
 use crate::consts::KEYWORDS;
 use crate::core::memory::Function;
-
+use coloredpp::Colorize;
+use smallvec::SmallVec;
+use unicode_xid::UnicodeXID;
+use TokenType::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType<'a> {
@@ -15,6 +15,7 @@ pub enum TokenType<'a> {
     EoF,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a> {
     Int(i32),
@@ -32,7 +33,9 @@ pub enum Value<'a> {
     Function(Function<'a>),
     Nil,
 }
+
 impl<'a> Value<'a> {
+    #[inline(always)]
     pub fn get_type(&self) -> &'a str {
         match self {
             Int(_) => "int",
@@ -51,26 +54,13 @@ impl<'a> Value<'a> {
             Nil => "nil",
         }
     }
+
+    #[inline(always)]
     pub fn same_type(&self, v2: &Value) -> bool {
-        match (self, v2) {
-            (Int(_), Int(_)) => true,
-            (Int64(_), Int64(_)) => true,
-            (Unt(_), Unt(_)) => true,
-            (Unt64(_), Unt64(_)) => true,
-            (Flt(_), Flt(_)) => true,
-            (F64(_), F64(_)) => true,
-            (Im32(_), Im32(_)) => true,
-            (Im64(_), Im64(_)) => true,
-            (Str(_), Str(_)) => true,
-            (Chr(_), Chr(_)) => true,
-            (Bol(_), Bol(_)) => true,
-            (HeapRef(_), HeapRef(_)) => true,
-            (Function(_), Function(_)) => true,
-            (Nil, Nil) => true,
-            _ => false,
-        }
+        std::mem::discriminant(self) == std::mem::discriminant(v2)
     }
 
+    #[inline(always)]
     pub fn is_truthy(&self) -> bool {
         match self {
             Int(a) => *a != 0,
@@ -81,9 +71,9 @@ impl<'a> Value<'a> {
             F64(a) => *a != 0.0,
             Im32(a) => *a != 0.0,
             Im64(a) => *a != 0.0,
-            Str(s) => s.len() > 0,
+            Str(s) => !s.is_empty(),
             Bol(b) => *b,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -118,23 +108,16 @@ pub struct Token<'a> {
     pub length: usize,
 }
 
-impl<'a> Token<'a> {
-    fn eof() -> Self {
-        Token {
-            lexeme: "\0",
-            token_type: EoF,
-            value: None,
-            length: 0,
-        }
-    }
-}
+const BUFFER_SIZE: usize = 128;
 
-#[derive(Debug)]
+static CHAR_LOOKUP: [u8; 256] = Scanner::build_char_lookup();
+
 pub struct Scanner<'a> {
     input: &'a str,
-    tokens: Vec<Token<'a>>,
-    line: usize,
-    pos: usize,
+    input_bytes: &'a [u8],
+    tokens: SmallVec<[Token<'a>; BUFFER_SIZE]>,
+    line: u32,
+    pos: u32,
     start: usize,
     current: usize,
 }
@@ -143,7 +126,8 @@ impl<'a> Scanner<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
             input,
-            tokens: Vec::with_capacity(128),
+            input_bytes: input.as_bytes(),
+            tokens: SmallVec::with_capacity(BUFFER_SIZE),
             line: 1,
             pos: 1,
             start: 0,
@@ -151,36 +135,56 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub fn start(&mut self) -> &Vec<Token> {
+    pub fn start(&mut self) -> Vec<Token<'a>> {
         while !self.is_eof() {
             self.start = self.current;
             self.consume();
         }
         self.tokens.push(Token::eof());
-        &self.tokens
+        self.tokens.to_vec()
+    }
+
+    const fn build_char_lookup() -> [u8; 256] {
+        let mut table = [0u8; 256];
+        let mut i = 0;
+        while i < 256 {
+            table[i] = match i as u8 as char {
+                '#' | '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '?' | '%' => 1,
+                ':' | '&' | '|' | '<' | '>' | '!' | '\\' | '+' | '-' | '*' | '=' | '.' => 2,
+                '/' => 3,
+                '\'' => 4,
+                '\r' => 5,
+                '\t' => 6,
+                ' ' => 7,
+                '\n' => 8,
+                '0'..='9' => 9,
+                'a'..='z' | 'A'..='Z' | '_' => 10,
+                _ => 0,
+            };
+            i += 1;
+        }
+        table
     }
 
     #[inline(always)]
     fn consume(&mut self) {
         let c = self.advance();
-        match c {
-            '#' | '_' | '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '?' | '%' => {
-                self.push(SingleChar(c), None)
-            }
-            ':' | '&' | '|' | '<' | '>' | '!' | '\\' | '+' | '-' | '*' | '=' | '.' => {
-                self.handle_operator(c)
-            }
-            '/' => self.handle_slash(),
-            '\'' => self.handle_string_literal(),
-            '\r' => {}
-            '\t' => self.pos += 4,
-            ' ' => self.pos += 1,
-            '\n' => {
+        let action = CHAR_LOOKUP[c as u8 as usize];
+
+        match action {
+            1 => self.push(SingleChar(c), None),
+            2 => self.handle_operator(c),
+            3 => self.handle_slash(),
+            4 => self.handle_string_literal(),
+            5 => {}
+            6 => self.pos += 4,
+            7 => self.pos += 1,
+            8 => {
                 self.pos = 1;
                 self.line += 1;
             }
-            _ if c.is_ascii_digit() => self.handle_number(),
-            _ if UnicodeXID::is_xid_start(c) || c == '_' => self.handle_identifier_or_keyword(),
+            9 => self.handle_number(),
+            10 => self.handle_identifier_or_keyword(),
             _ => self.push(Identifier, None),
         }
     }
@@ -219,6 +223,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
     fn handle_slash(&mut self) {
         match self.peek() {
             '/' => {
@@ -226,20 +231,7 @@ impl<'a> Scanner<'a> {
                     self.advance();
                 }
             }
-            '*' => {
-                while !self.is_eof() {
-                    if self.peek() == '*' && self.peek_next() == '/' {
-                        self.advance();
-                        self.advance();
-                        break;
-                    }
-                    if self.peek() == '\n' {
-                        self.line += 1;
-                        self.pos = 1;
-                    }
-                    self.advance();
-                }
-            }
+            '*' => self.handle_block_comment(),
             '=' => {
                 self.advance();
                 self.push(DblChar(('/', '=')), None);
@@ -248,6 +240,23 @@ impl<'a> Scanner<'a> {
         }
     }
 
+    #[inline(always)]
+    fn handle_block_comment(&mut self) {
+        while !self.is_eof() {
+            if self.peek() == '*' && self.peek_next() == '/' {
+                self.advance();
+                self.advance();
+                break;
+            }
+            if self.peek() == '\n' {
+                self.line += 1;
+                self.pos = 1;
+            }
+            self.advance();
+        }
+    }
+
+    #[inline(always)]
     fn handle_string_literal(&mut self) {
         while self.peek() != '\'' && !self.is_eof() {
             if self.peek() == '\\' {
@@ -259,63 +268,59 @@ impl<'a> Scanner<'a> {
         let lexeme = &self.input[self.start + 1..self.current - 1];
         if lexeme.len() == 1 {
             let val = lexeme.chars().next().unwrap_or('\0');
-            self.push(
-                Literal(Chr(val)),
-                Some(Chr(val)),
-            );
+            self.push(Literal(Chr(val)), Some(Chr(val)));
         } else {
             let val = Str(lexeme.to_string());
             self.push(Literal(val.clone()), Some(val));
         }
     }
 
+    #[inline(always)]
     fn handle_number(&mut self) {
         let mut is_float = false;
-        while self.peek().is_ascii_digit() {
+        while self.peek_byte().is_ascii_digit() {
             self.advance();
         }
-        if self.peek() == '.' && self.peek_next().is_ascii_digit() {
+        if self.peek() == '.' && self.peek_next_byte().is_ascii_digit() {
             is_float = true;
             self.advance();
-            while self.peek().is_ascii_digit() {
+            while self.peek_byte().is_ascii_digit() {
                 self.advance();
             }
         }
         if self.peek() == 'i' {
             self.advance();
             let lexeme = &self.input[self.start..self.current - 1];
-            let value = lexeme.parse::<f32>().unwrap();
+            let value = unsafe { lexeme.parse::<f32>().unwrap_unchecked() };
             self.push(Literal(Im32(value)), Some(Im32(value)));
-        } else {
-            let lexeme = &self.input[self.start..self.current];
-            let value = if is_float {
-                match lexeme.parse::<f32>() {
-                    Ok(lex) => Flt(lex),
-                    _ => {
-                        let val = lexeme.parse::<f64>().unwrap();
-                        F64(val)
-                    }
-                }
-            } else {
-                match lexeme.parse::<i32>() {
-                    Ok(lex) => Int(lex),
-                    _ => {
-                        let val = lexeme.parse::<i64>().unwrap();
-                        Int64(val)
-                    }
-                }
-            };
-            self.push(Literal(value.clone()), Some(value));
+            return;
         }
+
+        let lexeme = &self.input[self.start..self.current];
+        let value = if is_float {
+            if let Ok(v) = lexeme.parse::<f32>() {
+                Flt(v)
+            } else {
+                F64(unsafe { lexeme.parse::<f64>().unwrap_unchecked() })
+            }
+        } else {
+            if let Ok(v) = lexeme.parse::<i32>() {
+                Int(v)
+            } else {
+                Int64(unsafe { lexeme.parse::<i64>().unwrap_unchecked() })
+            }
+        };
+        self.push(Literal(value.clone()), Some(value));
     }
 
+    #[inline(always)]
     fn handle_identifier_or_keyword(&mut self) {
         while UnicodeXID::is_xid_continue(self.peek()) {
             self.advance();
         }
         let lexeme = &self.input[self.start..self.current];
-
-        let token_type = if KEYWORDS.contains(&lexeme) {
+        
+        let token_type = if KEYWORDS.contains(&lexeme){
             Keyword(lexeme)
         } else {
             Identifier
@@ -333,10 +338,11 @@ impl<'a> Scanner<'a> {
             value,
             length,
         });
-        self.pos += length;
+        self.pos += length as u32;
     }
 
-    #[inline]    #[inline(always)]    fn advance(&mut self) -> char {
+    #[inline(always)]
+    fn advance(&mut self) -> char {
         let c = self.peek();
         self.current += c.len_utf8();
         c
@@ -348,6 +354,16 @@ impl<'a> Scanner<'a> {
     }
 
     #[inline(always)]
+    fn peek_byte(&self) -> u8 {
+        *self.input_bytes.get(self.current).unwrap_or(&0)
+    }
+
+    #[inline(always)]
+    fn peek_next_byte(&self) -> u8 {
+        *self.input_bytes.get(self.current + 1).unwrap_or(&0)
+    }
+
+    #[inline(always)]
     fn peek_next(&self) -> char {
         self.input[self.current..].chars().nth(1).unwrap_or('\0')
     }
@@ -355,5 +371,16 @@ impl<'a> Scanner<'a> {
     #[inline(always)]
     fn is_eof(&self) -> bool {
         self.current >= self.input.len() || self.peek() == '\0'
+    }
+}
+
+impl<'a> Token<'a> {
+    fn eof() -> Self {
+        Token {
+            lexeme: "\0",
+            token_type: EoF,
+            value: None,
+            length: 0,
+        }
     }
 }

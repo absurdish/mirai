@@ -1,7 +1,7 @@
 use crate::cli::run::cmd_run;
 use crate::consts::*;
 use crate::throw;
-use clap::{error::ErrorKind, CommandFactory, Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use coloredpp::Colorize;
 
 mod run;

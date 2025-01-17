@@ -17,7 +17,7 @@ pub fn run(input: &str) {
     let mut scanner = Scanner::new(input);
     let tokens = scanner.start();
     // token parser
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::new(&tokens);
     let stmts = match parser.start() {
         Ok(stmts) => stmts,
         Err(err) => {

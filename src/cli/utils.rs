@@ -1,6 +1,3 @@
-use std::fmt::Display;
-use coloredpp::Colorize;
-
 #[macro_export]
 macro_rules! throw {
     ($msg:expr, $exit:expr) => {
@@ -10,7 +7,7 @@ macro_rules! throw {
         }
     };
     ($msg:expr) => {
-        println!("{}{}", "error: ".red().bold(), $msg.to_string().red());
+        println!("{}{}", "error: ".red().bold(), $msg.to_string().red())
     };
 }
 

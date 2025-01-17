@@ -1,8 +1,12 @@
-use crate::core::scanner::{Value, Token, TokenType::{self, *}};
+use crate::core::env::{ApplyKind, Method};
+use crate::core::scanner::{
+    Token,
+    TokenType::{self, *},
+    Value,
+};
 use std::fmt;
 use std::process::exit;
 use std::rc::Rc;
-use crate::core::env::{ApplyKind, Method};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr<'a> {
@@ -16,20 +20,41 @@ pub enum Expr<'a> {
         name: Token<'a>,
         method: Option<(&'a str, Vec<Expr<'a>>)>,
     },
-    Call { id: usize, name: Box<Expr<'a>>, args: Vec<Expr<'a>> },
-    Unary { id: usize, op: Token<'a>, rhs: Box<Expr<'a>> },
-    Binary { id: usize, op: Token<'a>, lhs: Box<Expr<'a>>, rhs: Box<Expr<'a>> },
-    Grouping { id: usize, expr: Box<Expr<'a>> },
-    Value { id: usize, value: Value<'a> },
+    Call {
+        id: usize,
+        name: Box<Expr<'a>>,
+        args: Vec<Expr<'a>>,
+    },
+    Unary {
+        id: usize,
+        op: Token<'a>,
+        rhs: Box<Expr<'a>>,
+    },
+    Binary {
+        id: usize,
+        op: Token<'a>,
+        lhs: Box<Expr<'a>>,
+        rhs: Box<Expr<'a>>,
+    },
+    Grouping {
+        id: usize,
+        expr: Box<Expr<'a>>,
+    },
+    Value {
+        id: usize,
+        value: Value<'a>,
+    },
     Null,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum UseKinds<'a> {
     Str(&'a str),
     List(Vec<&'a str>),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt<'a> {
     Print(Expr<'a>),
@@ -86,7 +111,6 @@ pub enum Stmt<'a> {
 pub enum ParserError {
     UnexpectedToken(String),
     MissingToken(String),
-    UnknownError(String),
 }
 
 impl fmt::Display for ParserError {
@@ -94,123 +118,130 @@ impl fmt::Display for ParserError {
         match self {
             ParserError::UnexpectedToken(msg) => write!(f, "Unexpected token: {}", msg),
             ParserError::MissingToken(msg) => write!(f, "Missing token: {}", msg),
-            ParserError::UnknownError(msg) => write!(f, "Unknown error: {}", msg),
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Parser<'a> {
-    pub tokens: &'a Vec<Token<'a>>,
-    pub current: usize,
-    pub id_counter: usize,
+    tokens: &'a [Token<'a>],
+    current: usize,
+    id_counter: usize,
 }
 
 impl<'a> Parser<'a> {
+    #[inline]
     pub fn new(tokens: &'a Vec<Token<'a>>) -> Self {
         Self {
-            tokens,
+            tokens: tokens.as_slice(),
             current: 0,
             id_counter: 0,
         }
     }
 
+    #[inline]
     pub fn start(&mut self) -> Result<Vec<Stmt<'a>>, ParserError> {
-        let mut stmts = Vec::with_capacity((self.tokens.len() as f32 / 4.0).round() as usize + 1);
+        let mut stmts = Vec::with_capacity((self.tokens.len() >> 2) + 1);
         while !self.is_at_end() && self.peek().token_type != EoF {
             stmts.push(self.stmt()?);
         }
-        stmts.shrink_to_fit();
         Ok(stmts)
     }
-    //
-    // parse statements
-    //
-    pub fn stmt(&mut self) -> Result<Stmt<'a>, ParserError> {
-        let token = self.peek();
-        match &token.token_type {
-            Keyword(k) => match *k {
-                "if" => self.stmt_if(),
-                "while" => self.stmt_while(),
-                "impl" => self.stmt_impl(),
-                "break" => {
-                    self.advance();
-                    Ok(Stmt::Break)
-                }
-                "self" => {
-                    self.advance();
-                    Ok(Stmt::Expr(Expr::Var {
-                        id: self.id_counter,
-                        name: Token {
-                            lexeme: "self",
-                            token_type: Keyword("self"),
-                            value: None,
-                            length: 4,
-                        },
-                        method: None,
-                    }))
-                }
-                "print" => {
-                    self.consume(Keyword("print"))?;
-                    let expr = self.expr()?;
-                    Ok(Stmt::Print(expr))
-                }
-                "return" => {
-                    self.consume(Keyword("return"))?;
-                    let expr = self.expr()?;
-                    Ok(Stmt::Return(expr))
-                }
-                _ if self.is_type_kwd(k) => {
-                    let type_ = self.consume(Keyword(k))?;
-                    let name = self.consume(Identifier)?;
-                    if self.check(&SingleChar('=')) {
-                        self.stmt_var(name, type_)
-                    } else {
-                        self.stmt_fn(name, type_)
-                    }
-                }
-                _ => Err(ParserError::UnexpectedToken(k.to_string())),
-            },
-            SingleChar(c) if *c == '{' => Ok(Stmt::Block {
+
+    #[inline]
+    fn stmt(&mut self) -> Result<Stmt<'a>, ParserError> {
+        match &self.peek().token_type {
+            Keyword(k) => self.handle_keyword(k),
+            SingleChar('{') => Ok(Stmt::Block {
                 stmts: self.stmt_block()?,
                 rules: &[],
             }),
-            _ => Ok(self.expr_stmt()?),
+            _ => Ok(Stmt::Expr(self.expr()?)),
         }
     }
 
+    #[inline]
+    fn handle_keyword(&mut self, k: &'a str) -> Result<Stmt<'a>, ParserError> {
+        match k {
+            "if" => self.stmt_if(),
+            "while" => self.stmt_while(),
+            "impl" => self.stmt_impl(),
+            "break" => {
+                self.advance();
+                Ok(Stmt::Break)
+            }
+            "self" => {
+                self.advance();
+                Ok(Stmt::Expr(Expr::Var {
+                    id: self.id_counter,
+                    name: Token {
+                        lexeme: "self",
+                        token_type: Keyword("self"),
+                        value: None,
+                        length: 4,
+                    },
+                    method: None,
+                }))
+            }
+            "print" => {
+                self.advance();
+                let expr = self.expr()?;
+                Ok(Stmt::Print(expr))
+            }
+            "return" => {
+                self.advance();
+                let expr = self.expr()?;
+                Ok(Stmt::Return(expr))
+            }
+            _ if self.is_type_kwd(k) => {
+                let type_ = self.advance();
+                let name = self.consume(Identifier)?;
+                if self.check(&SingleChar('=')) {
+                    self.stmt_var(name, type_)
+                } else {
+                    self.stmt_fn(name, type_)
+                }
+            }
+            _ => Err(ParserError::UnexpectedToken(k.to_string())),
+        }
+    }
+    #[inline]
     fn stmt_var(&mut self, name: Token<'a>, type_: Token<'a>) -> Result<Stmt<'a>, ParserError> {
-        self.consume(SingleChar('='))?;
-        let is_const = self.match_token(SingleChar('='));
+        self.advance(); // consume '='
         let value = self.expr()?;
-
         Ok(Stmt::Var {
             id: name,
             type_,
             value,
-            is_const,
+            is_const: false,
             is_pub: false,
             rules: &[],
         })
     }
 
+    #[inline]
     fn stmt_fn(&mut self, name: Token<'a>, type_: Token<'a>) -> Result<Stmt<'a>, ParserError> {
         self.consume(SingleChar('('))?;
         let mut params = Vec::with_capacity(4);
-        while !self.check(&SingleChar(')')) {
-            if self.is_type_kwd(self.peek().lexeme) {
-                let type_ = self.consume(Keyword(self.peek().lexeme))?;
-                let param_name = self.consume(Identifier)?;
-                params.push((param_name, type_));
-                if !self.match_token(SingleChar(',')) {
-                    break;
+
+        if !self.check(&SingleChar(')')) {
+            loop {
+                if self.is_type_kwd(self.peek().lexeme) {
+                    let type_ = self.advance();
+                    let param_name = self.consume(Identifier)?;
+                    params.push((param_name, type_));
+                    if !self.match_token(SingleChar(',')) {
+                        break;
+                    }
+                } else {
+                    return Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()));
                 }
-            } else {
-                return Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()));
             }
         }
+
         self.consume(SingleChar(')'))?;
         let body = self.stmt_block()?;
+
         Ok(Stmt::Fn {
             id: name,
             type_,
@@ -220,18 +251,19 @@ impl<'a> Parser<'a> {
             rules: &[],
         })
     }
+
+    #[inline]
     fn stmt_method(&mut self) -> Option<Method<'a>> {
         if let Keyword(k) = self.peek().token_type {
             if self.is_type_kwd(k) {
-                let type_ = self.consume(Keyword(self.peek().lexeme)).unwrap();
-                let name = self.consume(Identifier).unwrap();
-                let _ = self.consume(SingleChar('('));
-                let mut params = Vec::with_capacity(4);
-                params.push(("self", type_.lexeme));
+                let type_ = self.advance();
+                let name = self.consume(Identifier).ok()?;
+                self.consume(SingleChar('(')).ok()?;
+                let mut params = vec![("self", type_.lexeme)];
                 while !self.check(&SingleChar(')')) {
                     if self.is_type_kwd(self.peek().lexeme) {
-                        let type_ = self.consume(Keyword(self.peek().lexeme)).unwrap();
-                        let param_name = self.consume(Identifier).unwrap();
+                        let type_ = self.advance();
+                        let param_name = self.consume(Identifier).ok()?;
                         params.push((param_name.lexeme, type_.lexeme));
                         if !self.match_token(SingleChar(',')) {
                             break;
@@ -240,17 +272,16 @@ impl<'a> Parser<'a> {
                         return None;
                     }
                 }
-                let _ = self.consume(SingleChar(')'));
-                let body = match self.stmt_block() {
-                    Ok(v) => v,
-                    Err(err) => {
-                        println!("{}", err);
-                        exit(1);
-                    }
-                };
+                self.consume(SingleChar(')')).ok()?;
+                let body = self
+                    .stmt_block()
+                    .map_err(|e| {
+                        println!("{}", e);
+                        exit(1)
+                    })
+                    .ok()?;
                 return Some(Method {
                     name: name.lexeme,
-                    // temporal solution
                     applies: ApplyKind::Normal(type_.lexeme),
                     type_: type_.lexeme,
                     params,
@@ -261,34 +292,40 @@ impl<'a> Parser<'a> {
         None
     }
 
+    #[inline]
     fn stmt_if(&mut self) -> Result<Stmt<'a>, ParserError> {
-        self.consume(Keyword("if"))?;
+        self.advance();
         let pred = self.expr()?;
-        let body = self.stmt()?.into();
+        let body = Box::new(self.stmt()?);
         let else_b = if self.match_token(Keyword("else")) {
-            Some(self.stmt()?.into())
+            Some(Box::new(self.stmt()?))
         } else {
             None
         };
         Ok(Stmt::If { pred, body, else_b })
     }
 
+    #[inline]
     fn stmt_while(&mut self) -> Result<Stmt<'a>, ParserError> {
-        self.consume(Keyword("while"))?;
-        let pred = self.expr()?;
-        let body = self.stmt()?.into();
-        Ok(Stmt::While { pred, body })
+        self.advance();
+        Ok(Stmt::While {
+            pred: self.expr()?,
+            body: Box::new(self.stmt()?),
+        })
     }
 
+    #[inline]
     fn stmt_impl(&mut self) -> Result<Stmt<'a>, ParserError> {
-        self.consume(Keyword("impl"))?;
-        let mut name = None;
-        if let Keyword(k) = self.peek().token_type {
+        self.advance();
+        let name = if let Keyword(k) = self.peek().token_type {
             if self.is_type_kwd(k) {
-                name = Some(self.consume(Keyword(self.peek().lexeme))?);
+                self.advance()
+            } else {
+                return Err(ParserError::UnexpectedToken(k.to_string()));
             }
-        }
-        let name = name.unwrap();
+        } else {
+            return Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()));
+        };
 
         self.consume(SingleChar('{'))?;
         let mut methods = Vec::with_capacity(4);
@@ -298,81 +335,63 @@ impl<'a> Parser<'a> {
             }
         }
         self.consume(SingleChar('}'))?;
-        Ok(Stmt::Impl { name, body: methods })
+        Ok(Stmt::Impl {
+            name,
+            body: methods,
+        })
     }
 
+    #[inline]
     fn stmt_block(&mut self) -> Result<Vec<Stmt<'a>>, ParserError> {
         self.consume(SingleChar('{'))?;
         let mut stmts = Vec::with_capacity(8);
+
         while !self.check(&SingleChar('}')) && !self.is_at_end() {
             stmts.push(self.stmt()?);
         }
+
         self.consume(SingleChar('}'))?;
         Ok(stmts)
     }
-    pub fn expr_stmt(&mut self) -> Result<Stmt<'a>, ParserError> {
-        let expr = self.expr()?;
-        Ok(Stmt::Expr(expr))
-    }
-    //
-    // parse expressions
-    //
-    pub fn expr(&mut self) -> Result<Expr<'a>, ParserError> {
+
+    #[inline]
+    fn expr(&mut self) -> Result<Expr<'a>, ParserError> {
         self.binary()
     }
 
-    pub fn binary(&mut self) -> Result<Expr<'a>, ParserError> {
+    #[inline]
+    fn binary(&mut self) -> Result<Expr<'a>, ParserError> {
         let mut expr = self.unary()?;
-        while !self.is_at_end() && self.match_any(&[
-            SingleChar('+'),
-            SingleChar('-'),
-            SingleChar('*'),
-            SingleChar('/'),
-            SingleChar('>'),
-            SingleChar('<'),
-            SingleChar('%'),
-            DblChar(('>', '=')),
-            DblChar(('<', '=')),
-            DblChar(('=', '=')),
-            DblChar(('!', '='))
-        ])
-        {
-            let op = self.prev(1);
-            let rhs = self.unary()?;
+        while !self.is_at_end() && self.match_binary_op() {
             expr = Expr::Binary {
                 id: self.next_id(),
                 lhs: Box::new(expr),
-                op,
-                rhs: Box::new(rhs),
+                op: self.prev(1),
+                rhs: Box::new(self.unary()?),
             };
         }
         Ok(expr)
     }
 
-    pub fn unary(&mut self) -> Result<Expr<'a>, ParserError> {
-        if self.match_any(&[
-            DblChar(('+', '+')),
-            DblChar(('-', '-')),
-            SingleChar('-'),
-            SingleChar('&')
-        ]) {
-            let op = self.prev(1);
-            let rhs = self.unary()?;
+    #[inline]
+    fn unary(&mut self) -> Result<Expr<'a>, ParserError> {
+        if self.match_unary_op() {
             Ok(Expr::Unary {
                 id: self.next_id(),
-                op,
-                rhs: Box::new(rhs),
+                op: self.prev(1),
+                rhs: Box::new(self.unary()?),
             })
         } else {
             self.call()
         }
     }
 
-    pub fn call(&mut self) -> Result<Expr<'a>, ParserError> {
+    #[inline]
+    fn call(&mut self) -> Result<Expr<'a>, ParserError> {
         let mut expr = self.primary()?;
         if self.check(&SingleChar('(')) {
             self.advance();
-            let mut args = Vec::with_capacity(2);
+            let mut args = Vec::with_capacity(4);
             while !self.check(&SingleChar(')')) {
                 args.push(self.expr()?);
                 if !self.match_token(SingleChar(',')) {
@@ -384,46 +403,40 @@ impl<'a> Parser<'a> {
                 name: Box::new(expr),
                 args,
                 id: self.next_id(),
-            }
+            };
         }
         Ok(expr)
     }
 
-    pub fn primary(&mut self) -> Result<Expr<'a>, ParserError> {
-        let token = self.peek();
-        match token.token_type {
+    #[inline]
+    fn primary(&mut self) -> Result<Expr<'a>, ParserError> {
+        match self.peek().token_type {
             Identifier => {
-                self.advance();
-
+                let token = self.advance();
                 if self.match_token(SingleChar('=')) {
-                    let value = self.expr()?;
                     return Ok(Expr::Assign {
                         id: self.next_id(),
                         name: token,
-                        value: Box::new(value),
+                        value: Box::new(self.expr()?),
                     });
                 }
 
-                let mut names = None;
-                let mut args = Vec::with_capacity(2);
-                if self.match_token(SingleChar('.')) {
+                let method = if self.match_token(SingleChar('.')) {
                     let name = self.consume(Identifier)?;
-                    names = Some(name);
                     self.consume(SingleChar('('))?;
+                    let mut args = Vec::with_capacity(4);
                     while !self.check(&SingleChar(')')) {
-                        let arg = self.expr()?;
-                        args.push(arg);
+                        args.push(self.expr()?);
                         if !self.match_token(SingleChar(',')) {
                             break;
                         }
                     }
                     self.consume(SingleChar(')'))?;
-                }
-                let method: Option<(&'a str, Vec<Expr>)> = if let Some(name) = names {
-                    Some((name.lexeme, args.clone()))
+                    Some((name.lexeme, args))
                 } else {
                     None
                 };
+
                 Ok(Expr::Var {
                     id: self.next_id(),
                     name: token,
@@ -440,35 +453,48 @@ impl<'a> Parser<'a> {
                 })
             }
             Literal(_) => {
-                self.advance();
+                let token = self.advance();
                 Ok(Expr::Value {
                     id: self.next_id(),
-                    value: self.token_to_literal(self.prev(1)),
+                    value: match token.token_type {
+                        Literal(c) => c,
+                        _ => Value::Nil,
+                    },
                 })
             }
-            _ => Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string()))
+            _ => Err(ParserError::UnexpectedToken(self.peek().lexeme.to_string())),
         }
     }
 
-    pub fn token_to_literal(&mut self, token: Token<'a>) -> Value<'a> {
-        match token.token_type {
-            Literal(c) => c,
-            _ => Value::Nil,
-        }
-    }
-    //
-    // parser helpers
-    //
-    fn consume_if_matches(&mut self, token_type: TokenType) -> Option<Token<'a>> {
-        if self.check(&token_type) {
-            Some(self.advance())
-        } else {
-            None
-        }
+    #[inline]
+    fn match_binary_op(&mut self) -> bool {
+        self.match_any(&[
+            SingleChar('+'),
+            SingleChar('-'),
+            SingleChar('*'),
+            SingleChar('/'),
+            SingleChar('>'),
+            SingleChar('<'),
+            SingleChar('%'),
+            DblChar(('>', '=')),
+            DblChar(('<', '=')),
+            DblChar(('=', '=')),
+            DblChar(('!', '=')),
+        ])
     }
 
-    fn is_type_kwd(&self, k: &'a str) -> bool {
-        // pull the custom types from the memory in the future
+    #[inline]
+    fn match_unary_op(&mut self) -> bool {
+        self.match_any(&[
+            DblChar(('+', '+')),
+            DblChar(('-', '-')),
+            SingleChar('-'),
+            SingleChar('&'),
+        ])
+    }
+
+    #[inline]
+    fn is_type_kwd(&self, k: &str) -> bool {
         matches!(
             k,
             "int"
@@ -490,28 +516,33 @@ impl<'a> Parser<'a> {
         )
     }
 
-    pub fn next_id(&mut self) -> usize {
+    #[inline]
+    fn next_id(&mut self) -> usize {
         let id = self.id_counter;
         self.id_counter += 1;
         id
     }
 
-    pub fn check(&self, token_type: &TokenType) -> bool {
+    #[inline]
+    fn check(&self, token_type: &TokenType) -> bool {
         if self.is_at_end() {
             return false;
         }
 
-        let current_token = &self.tokens[self.current];
-        match token_type {
-            SingleChar(c) => current_token.lexeme.chars().next() == Some(*c),
-            DblChar((c1, c2)) => current_token.lexeme == &format!("{}{}", c1, c2),
-            Keyword(kw) => &current_token.lexeme == kw,
-            _ => &current_token.token_type == token_type,
+        if let Some(current_token) = self.tokens.get(self.current) {
+            match token_type {
+                SingleChar(c) => current_token.lexeme.chars().next() == Some(*c),
+                DblChar((c1, c2)) => current_token.lexeme == &format!("{}{}", c1, c2),
+                Keyword(kw) => &current_token.lexeme == kw,
+                _ => &current_token.token_type == token_type,
+            }
+        } else {
+            false
         }
     }
 
-
-    pub fn consume(&mut self, token_type: TokenType) -> Result<Token<'a>, ParserError> {
+    #[inline]
+    fn consume(&mut self, token_type: TokenType) -> Result<Token<'a>, ParserError> {
         if self.check(&token_type) {
             Ok(self.advance())
         } else {
@@ -519,46 +550,27 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn consume_one_of(
-        &mut self,
-        token_types: &[TokenType],
-        error_msg: &str,
-    ) -> Result<Token<'a>, ParserError> {
-        for token_type in token_types {
-            if self.check(token_type) {
-                return Ok(self.advance());
-            }
-        }
-        Err(ParserError::MissingToken(error_msg.to_string()))
-    }
-
-    pub fn advance(&mut self) -> Token<'a> {
+    #[inline]
+    fn advance(&mut self) -> Token<'a> {
         if !self.is_at_end() {
             self.current += 1;
         }
         self.prev(1)
     }
 
-    pub fn prev(&self, steps: usize) -> Token<'a> {
-        if self.current < steps {
-            self.error_token()
+    #[inline]
+    fn prev(&self, steps: usize) -> Token<'a> {
+        if self.current >= steps {
+            self.tokens
+                .get(self.current - steps)
+                .cloned()
+                .unwrap_or_else(|| self.error_token())
         } else {
-            self.tokens[self.current - steps].clone()
+            self.error_token()
         }
     }
 
-    pub fn peek(&self) -> Token<'a> {
-        if self.is_at_end() {
-            self.error_token()
-        } else {
-            self.tokens[self.current].clone()
-        }
-    }
-
-    pub fn is_at_end(&self) -> bool {
-        self.current >= self.tokens.len()
-    }
-
+    #[inline]
     fn error_token(&self) -> Token<'a> {
         Token {
             token_type: EoF,
@@ -568,7 +580,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn match_token(&mut self, token_type: TokenType<'a>) -> bool {
+    #[inline]
+    fn peek(&self) -> Token<'a> {
+        self.tokens
+            .get(self.current)
+            .cloned()
+            .unwrap_or_else(|| self.error_token())
+    }
+
+    #[inline]
+    fn is_at_end(&self) -> bool {
+        self.current >= self.tokens.len()
+    }
+
+    #[inline]
+    fn match_token(&mut self, token_type: TokenType<'a>) -> bool {
         if self.check(&token_type) {
             self.advance();
             true
@@ -577,21 +603,13 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn match_any(&mut self, token_types: &[TokenType<'a>]) -> bool {
+    #[inline]
+    fn match_any(&mut self, token_types: &[TokenType<'a>]) -> bool {
         for token_type in token_types {
             if self.match_token(token_type.clone()) {
                 return true;
             }
         }
         false
-    }
-
-    pub fn match_any_token(&mut self, token_types: &[TokenType<'a>]) -> Option<TokenType<'a>> {
-        for token_type in token_types {
-            if self.match_token(token_type.clone()) {
-                return Some(token_type.clone());
-            }
-        }
-        None
     }
 }

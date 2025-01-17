@@ -1,4 +1,3 @@
-use crate::cli::utils;
 use crate::core::run;
 use crate::throw;
 use coloredpp::Colorize;
@@ -6,13 +5,11 @@ use memmap2::Mmap;
 use std::fs::File;
 use std::path::Path;
 use std::str::from_utf8;
-use std::time::Instant;
 
 /// `mirai run <target> [options]`
 ///
 ///  - `--dev` // enables dev mode
 pub fn cmd_run(target: String, args: Vec<String>) {
-    let start_time = Instant::now();
     let valid_extensions = ["mirai", "mir", "mr"];
     let path = Path::new(&target);
     let is_dev = args.contains(&String::from("--dev"));
@@ -54,15 +51,13 @@ pub fn cmd_run(target: String, args: Vec<String>) {
                 // run the interpreter with the input
                 // - pass the configuration options
                 run(input);
-                // measure the time of execution (including reading)
-                println!(
-                    "\n{}{:?}ms",
-                    "executed in: ".green(),
-                    start_time.elapsed().as_millis()
-                );
             }
-            Err(err) => throw!(format!("failed to open '{}' (memory-map)", target)),
+            Err(_) => {
+                throw!(format!("failed to open '{}' (memory-map)", target))
+            },
         },
-        Err(err) => throw!(format!("failed to read file '{}': {}", target, err)),
+        Err(err) => {
+            throw!(format!("failed to read file '{}': {}", target, err))
+        },
     }
 }

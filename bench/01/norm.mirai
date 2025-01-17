@@ -5,7 +5,7 @@ i64 add(i64 a, i64 b) {
     a + b
 }
 
-while i < 100000 {
+while i < 1000000 {
     sum = add(sum, i)
     i = i + 1
 }

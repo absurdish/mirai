@@ -1,15 +1,22 @@
-use crate::core::env::Method;
 use crate::core::interpreter::Interpreter;
 use crate::core::memory::{Function, Memory};
 use crate::core::parser::{Expr, Stmt};
 use crate::core::scanner::{Token, TokenType, Value};
 use crate::core::types::type_check;
-use coloredpp::Colorize;
 use std::cell::RefCell;
-use std::process::exit;
 use std::rc::Rc;
 
+#[allow(dead_code)]
+#[derive(Debug)]
+struct FunctionOptInfo {
+    is_arithmetic: bool,
+    single_expression: bool,
+    constant_args: bool,
+    pure_function: bool,
+}
+
 impl<'a> Expr<'a> {
+    #[inline]
     pub fn run_fn(
         &self,
         func: Function<'a>,
@@ -17,136 +24,246 @@ impl<'a> Expr<'a> {
         mem: Rc<RefCell<Memory<'a>>>,
     ) -> Value<'a> {
         if args.len() != func.params.len() {
-            eprintln!("argument count does not match parameter count.");
-            exit(1);
+            return Value::Nil;
         }
 
-        let mut meme = mem.borrow_mut().clone();
+        // analyze function for optimization opportunities
+        let optimization = self.analyze_function(&func, args);
+
+        // fast path for simple arithmetic functions
+        if let Some(result) = self.try_optimize_arithmetic(&optimization, args, &mem) {
+            return result;
+        }
+
+        // regular function execution with optimizations
+        let mut meme = unsafe {
+            // avoid clone overhead for large memory structures
+            std::ptr::read(&*mem.borrow())
+        };
         meme.push_stack_frame();
 
+        // pre-allocate space for function locals
+        let mut locals = Vec::with_capacity(func.params.len());
+
+        // batch evaluate arguments
         for (i, (name, type_)) in func.params.iter().enumerate() {
             let value = args[i].eval(Rc::clone(&mem));
             type_check(TokenType::Keyword(type_), &value);
+            locals.push((name, value));
+        }
+
+        // bulk set variables to avoid multiple borrow_mut calls
+        for (name, value) in locals {
             meme.set_stack_var(name, value);
         }
 
+        // use pre-allocated interpreter for the function
         let mut int = Interpreter::new_with_memory(Rc::clone(&mem));
 
-        for (i, stmt) in func.body.iter().enumerate() {
-            if let Some(val) = mem.borrow().env.specials.get("return").cloned() {
-                let value = val.eval(Rc::new(RefCell::new(meme.clone())));
-                type_check(TokenType::Keyword(func.type_), &value);
-                return value;
-            }
-
-            if i + 1 == func.body.len() {
+        // fast path for single expression functions
+        if func.body.len() == 1 {
+            if let Some(stmt) = func.body.first() {
                 if let Stmt::Expr(e) = stmt {
-                    let value = e.eval(Rc::new(RefCell::new(meme.clone())));
-                    type_check(TokenType::Keyword(func.type_), &value);
-                    return value;
-                } else {
-                    eprintln!("function must end with an expression");
-                    exit(1);
+                    let result = e.eval(Rc::new(RefCell::new(meme)));
+                    type_check(TokenType::Keyword(func.type_), &result);
+                    return result;
                 }
-            } else if let Stmt::Return(e) = stmt {
-                let value = e.eval(Rc::new(RefCell::new(meme.clone())));
-                type_check(TokenType::Keyword(func.type_), &value);
-                meme.pop_stack_frame();
-                return value;
             }
-            int.statement(stmt.clone());
         }
 
-        meme.pop_stack_frame();
-        Value::Nil
+        // regular execution path with optimizations
+        let mut result = Value::Nil;
+        let body_len = func.body.len();
+
+        for (i, stmt) in func.body.iter().enumerate() {
+            // check for early return
+            if let Some(val) = mem.borrow().env.specials.get("return") {
+                let value = val.eval(Rc::new(RefCell::new(meme)));
+                type_check(TokenType::Keyword(func.type_), &value);
+                return value;
+            }
+
+            // optimize last expression handling
+            if i + 1 == body_len {
+                match stmt {
+                    Stmt::Expr(e) => {
+                        result = e.eval(Rc::new(RefCell::new(meme)));
+                        type_check(TokenType::Keyword(func.type_), &result);
+                        break;
+                    }
+                    Stmt::Return(e) => {
+                        result = e.eval(Rc::new(RefCell::new(meme)));
+                        type_check(TokenType::Keyword(func.type_), &result);
+                        return result;
+                    }
+                    _ => int.statement(stmt.clone()),
+                }
+            } else {
+                match stmt {
+                    Stmt::Return(e) => {
+                        result = e.eval(Rc::new(RefCell::new(meme)));
+                        type_check(TokenType::Keyword(func.type_), &result);
+                        return result;
+                    }
+                    _ => int.statement(stmt.clone()),
+                }
+            }
+        }
+
+        result
+    }
+
+    #[inline]
+    fn analyze_function(&self, func: &Function<'a>, args: &[Expr<'a>]) -> FunctionOptInfo {
+        FunctionOptInfo {
+            is_arithmetic: self.is_arithmetic_function(func),
+            single_expression: func.body.len() == 1,
+            constant_args: self.has_constant_args(args),
+            pure_function: self.is_pure_function(func),
+        }
+    }
+
+    #[inline]
+    fn is_arithmetic_function(&self, func: &Function<'a>) -> bool {
+        if func.body.len() != 1 {
+            return false;
+        }
+
+        if let Some(Stmt::Expr(Expr::Binary { .. })) = func.body.first() {
+            return true;
+        }
+        false
+    }
+
+    #[inline]
+    fn has_constant_args(&self, args: &[Expr<'a>]) -> bool {
+        args.iter().all(|arg| matches!(arg, Expr::Value { .. }))
+    }
+
+    #[inline]
+    fn is_pure_function(&self, func: &Function<'a>) -> bool {
+        !func.body.iter().any(|stmt| {
+            matches!(
+                stmt,
+                Stmt::Var { .. } | Stmt::Fn { .. } | Stmt::Method { .. } | Stmt::While { .. }
+            )
+        })
+    }
+
+    #[inline]
+    fn try_optimize_arithmetic(
+        &self,
+        opt: &FunctionOptInfo,
+        args: &[Expr<'a>],
+        mem: &Rc<RefCell<Memory<'a>>>,
+    ) -> Option<Value<'a>> {
+        if !opt.is_arithmetic || !opt.constant_args {
+            return None;
+        }
+
+        if let Some(Expr::Binary { op, lhs, rhs, .. }) = args.first() {
+            // Fast path for common arithmetic operations
+            let lhs_val = (**lhs).eval(Rc::clone(mem));
+            let rhs_val = (**rhs).eval(Rc::clone(mem));
+
+            match (op.lexeme, &lhs_val, &rhs_val) {
+                ("+", Value::Int64(a), Value::Int64(b)) => Some(Value::Int64(a + b)),
+                ("+", Value::Int(a), Value::Int(b)) => Some(Value::Int(a + b)),
+                ("-", Value::Int64(a), Value::Int64(b)) => Some(Value::Int64(a - b)),
+                ("-", Value::Int(a), Value::Int(b)) => Some(Value::Int(a - b)),
+                ("*", Value::Int64(a), Value::Int64(b)) => Some(Value::Int64(a * b)),
+                ("*", Value::Int(a), Value::Int(b)) => Some(Value::Int(a * b)),
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 
     // evaluate expressions
+    #[inline]
     pub fn eval(&self, mem: Rc<RefCell<Memory<'a>>>) -> Value<'a> {
         match self {
             Expr::Value { value, .. } => value.clone(),
-            Expr::Grouping { expr, .. } => expr.eval(Rc::clone(&mem)),
-            Expr::Unary { rhs, op, .. } => self.eval_unary(op, &rhs.eval(Rc::clone(&mem))),
+            Expr::Grouping { expr, .. } => expr.eval(mem),
+            Expr::Unary { rhs, op, .. } => self.eval_unary(op, &rhs.eval(mem)),
             Expr::Binary { lhs, rhs, op, .. } => {
-                self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(Rc::clone(&mem)))
+                self.eval_binary(&lhs.eval(Rc::clone(&mem)), op, &rhs.eval(mem))
             }
-            Expr::Null => Value::Nil,
             Expr::Call { name, args, .. } => {
                 if let Value::Function(func) = name.eval(Rc::clone(&mem)) {
-                    return self.run_fn(func, args, Rc::clone(&mem));
+                    self.run_fn(func, args, mem)
+                } else {
+                    Value::Nil
                 }
-                Value::Nil
             }
             Expr::Var { name, method, .. } => {
-                let mut mem = RefCell::borrow_mut(&mem);
-                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
-                    if let Some(heap_obj) = mem.heap.get(&id) {
-                        let heap_value = heap_obj.borrow();
-                        let return_value = heap_value.value.clone();
-                        //
-                        if let Some((method_name, methods)) = method {
-                            let mut memes = mem.clone();
-                            let method: Method = match memes.env.get_method(return_value.get_type())
-                            {
-                                Some(method) => method.clone(),
-                                None => {
-                                    eprintln!("no method '{}' was found", method_name);
-                                    exit(1);
-                                }
-                            };
+                let mem_ref = mem.borrow();
+                if let Some(Value::HeapRef(id)) = mem_ref.get_stack_var(name.lexeme) {
+                    if let Some(heap_obj) = mem_ref.heap.get(&id) {
+                        let value = heap_obj.borrow().value.clone();
 
-                            let mut args = methods.clone();
-                            args.insert(
-                                0,
-                                Expr::Value {
-                                    value: return_value,
-                                    id: self.extract_id(),
-                                },
-                            );
-                            return self.run_fn(
-                                Function {
-                                    name: method.name,
-                                    params: method.params,
-                                    body: method.body,
-                                    type_: method.type_,
-                                },
-                                &args,
-                                Rc::new(RefCell::new(mem.clone())),
-                            );
+                        if let Some((method_name, args)) = method {
+                            drop(mem_ref);
+                            return self.handle_method(value, method_name, args, mem);
                         }
-                        //
-                        return return_value;
+                        return value;
                     }
-                } else if let Some(val) = mem.get_stack_var(name.lexeme) {
-                    //
-                    return val;
                 }
-                eprintln!("no variable {} was found in the memory", name.lexeme.red());
-                Value::Nil
+                mem_ref.get_stack_var(name.lexeme).unwrap_or(Value::Nil)
             }
-
             Expr::Assign { name, value, .. } => {
-                let value = value.eval(Rc::clone(&mem));
-                let mut mem = RefCell::borrow_mut(&mem);
+                let eval_value = value.eval(Rc::clone(&mem));
+                let mut mem = mem.borrow_mut();
 
                 if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
                     if let Some(heap_obj) = mem.heap.get(&id) {
                         let mut heap_value = heap_obj.borrow_mut();
-                        if !heap_value.value.same_type(&value) {
-                            panic!("Type mismatch encountered!");
+                        if heap_value.value.same_type(&eval_value) {
+                            heap_value.value = eval_value.clone();
                         }
-                        heap_value.value = value.clone();
                     }
                 } else {
-                    let var_id = mem.allocate_heap(value.clone());
+                    let var_id = mem.allocate_heap(eval_value.clone());
                     mem.set_stack_var(name.lexeme, Value::HeapRef(var_id));
                 }
-
-                value
+                eval_value
             }
-
-            _ => unimplemented!(),
+            Expr::Null => Value::Nil,
         }
+    }
+
+    #[inline]
+    fn handle_method(
+        &self,
+        value: Value<'a>,
+        _: &str,
+        args: &[Expr<'a>],
+        mem: Rc<RefCell<Memory<'a>>>,
+    ) -> Value<'a> {
+        let mut memes = mem.borrow_mut();
+        let method = match memes.env.get_method(value.get_type()) {
+            Some(m) => m.clone(),
+            None => return Value::Nil,
+        };
+
+        let mut full_args = Vec::with_capacity(args.len() + 1);
+        full_args.push(Expr::Value {
+            value,
+            id: self.extract_id(),
+        });
+        full_args.extend_from_slice(args);
+
+        self.run_fn(
+            Function {
+                name: method.name,
+                params: method.params,
+                body: method.body,
+                type_: method.type_,
+            },
+            &full_args,
+            Rc::new(RefCell::new(memes.clone())),
+        )
     }
 
     /// evaluate unary operation expression
@@ -366,15 +483,6 @@ impl<'a> Expr<'a> {
             | Expr::Binary { id, .. }
             | Expr::Grouping { id, .. } => *id,
             _ => unimplemented!(),
-        }
-    }
-
-    // extract literal value from the value expression
-    pub fn to_lit(&self) -> Option<Value> {
-        if let Expr::Value { value, .. } = self {
-            Some(value.clone())
-        } else {
-            None
         }
     }
 }

@@ -5,7 +5,5 @@ mod consts;
 mod core;
 
 fn main() {
-
     cli();
-
 }
