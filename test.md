@@ -23,12 +23,14 @@ print sum
 - mega: `10m` iterations
 
 | language       | mini  | norm  | mega  |
-| :------------- | :---: | :---: | :---: |
+|:---------------| :---: | :---: | :---: |
 | python         | 25ms  | 130ms |  1s   |
 | go             | 95ms  | 97ms | 100ms |
 | javascript     | 35ms  | 35ms  | 40ms  |
 | 0.0.4          | 120ms |  1s   |  10s  |
-| 0.0.5 [latest] |  3ms  |  3ms  |  3ms  |
+| 0.0.5          |  3ms  |  3ms  |  3ms  |
+| 0.0.6 [latest] |       |       |       |
+|                |       |       |       |
 
 ### 2. nested loop
 

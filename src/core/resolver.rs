@@ -117,7 +117,7 @@ impl<'a> Resolver<'a> {
     #[inline]
     pub fn resolve_expr(&mut self, expr: &Expr<'a>) {
         match expr {
-            Expr::Var { name, id, method } => {
+            Expr::Var { name, id, method, .. } => {
                 if let Some((_, es)) = method {
                     es.iter().for_each(|e| self.resolve_expr(e));
                 }

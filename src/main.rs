@@ -4,6 +4,4 @@ mod cli;
 mod consts;
 mod core;
 
-fn main() {
-    cli();
-}
+fn main() {cli();}

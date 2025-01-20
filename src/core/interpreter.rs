@@ -1,5 +1,5 @@
 use super::scanner::Token;
-use crate::core::memory::{Function, Memory};
+use crate::core::memory::{Function, Memory, Metadata};
 use crate::core::parser::{Expr, Stmt};
 use crate::core::scanner::{TokenType, Value};
 use crate::core::types::type_check;
@@ -48,9 +48,9 @@ impl<'a> Interpreter<'a> {
                 e.eval(Rc::clone(&self.memory));
             }
             Stmt::Var {
-                id, value, type_, ..
+                id, value, type_, is_const, ..
             } => {
-                self.handle_var_declaration(id.lexeme, value, type_);
+                self.handle_var_declaration(id.lexeme, value, type_, is_const);
             }
             Stmt::Fn {
                 id,
@@ -91,7 +91,7 @@ impl<'a> Interpreter<'a> {
     }
 
     #[inline]
-    fn handle_var_declaration(&mut self, name: &'a str, value: Expr<'a>, type_: Token<'a>) {
+    fn handle_var_declaration(&mut self, name: &'a str, value: Expr<'a>, type_: Token<'a>, is_const: bool) {
         let value = match (value.eval(Rc::clone(&self.memory)), &type_.token_type) {
             (Value::Int(a), TokenType::Keyword("i64")) => Value::Int64(a as i64),
             (Value::Unt(a), TokenType::Keyword("u64")) => Value::Unt64(a as u64),
@@ -103,7 +103,7 @@ impl<'a> Interpreter<'a> {
 
         let mut mem = self.memory.borrow_mut();
         let var_id = mem.allocate_heap(value);
-        mem.set_stack_var(name, Value::HeapRef(var_id));
+        mem.set_stack_var(name, Value::HeapRef(var_id), Metadata::Var {is_const});
     }
 
     #[inline]
@@ -176,7 +176,7 @@ impl<'a> Interpreter<'a> {
             if let (Expr::Var { .. }, Expr::Value { value, .. }) = (&**lhs, &**rhs) {
                 match value {
                     Value::Int(_) | Value::Int64(_) => op.lexeme == "<",
-                    // todo: add other operations
+                    // add other operations
                     _ => false,
                 }
             } else {
@@ -263,8 +263,8 @@ impl<'a> Interpreter<'a> {
 
                     // update final values
                     let var_id = mem.allocate_heap(Value::Int64(sum));
-                    mem.set_stack_var(sum_var.lexeme, Value::HeapRef(var_id));
-                    mem.set_stack_var(counter_name, Value::Int64(iterations));
+                    mem.set_stack_var(sum_var.lexeme, Value::HeapRef(var_id), Metadata::Null);
+                    mem.set_stack_var(counter_name, Value::Int64(iterations), Metadata::Null);
                 }
             }
         } else {

@@ -19,6 +19,8 @@ pub enum Expr<'a> {
         id: usize,
         name: Token<'a>,
         method: Option<(&'a str, Vec<Expr<'a>>)>,
+        parent: Option<&'a str>,
+        is_borrow: bool,
     },
     Call {
         id: usize,
@@ -127,6 +129,7 @@ pub struct Parser<'a> {
     tokens: &'a [Token<'a>],
     current: usize,
     id_counter: usize,
+    current_var: Option<&'a str>,
 }
 
 impl<'a> Parser<'a> {
@@ -136,6 +139,7 @@ impl<'a> Parser<'a> {
             tokens: tokens.as_slice(),
             current: 0,
             id_counter: 0,
+            current_var: None,
         }
     }
 
@@ -181,6 +185,8 @@ impl<'a> Parser<'a> {
                         length: 4,
                     },
                     method: None,
+                    parent: None,
+                    is_borrow: false,
                 }))
             }
             "print" => {
@@ -196,7 +202,7 @@ impl<'a> Parser<'a> {
             _ if self.is_type_kwd(k) => {
                 let type_ = self.advance();
                 let name = self.consume(Identifier)?;
-                if self.check(&SingleChar('=')) {
+                if self.check(&SingleChar('=')) || self.check(&DblChar(('=', '='))) {
                     self.stmt_var(name, type_)
                 } else {
                     self.stmt_fn(name, type_)
@@ -207,13 +213,18 @@ impl<'a> Parser<'a> {
     }
     #[inline]
     fn stmt_var(&mut self, name: Token<'a>, type_: Token<'a>) -> Result<Stmt<'a>, ParserError> {
-        self.advance(); // consume '='
+        let is_const = self.check(&DblChar(('=', '='))); // check if var is constant
+        self.advance(); // consume '=' or '=='
+
+        self.current_var = Some(name.lexeme);
         let value = self.expr()?;
+        self.current_var = None;
+
         Ok(Stmt::Var {
             id: name,
             type_,
             value,
-            is_const: false,
+            is_const,
             is_pub: false,
             rules: &[],
         })
@@ -413,6 +424,8 @@ impl<'a> Parser<'a> {
         match self.peek().token_type {
             Identifier => {
                 let token = self.advance();
+                let is_borrow = self.consume(SingleChar('&')).is_ok();
+
                 if self.match_token(SingleChar('=')) {
                     return Ok(Expr::Assign {
                         id: self.next_id(),
@@ -441,6 +454,8 @@ impl<'a> Parser<'a> {
                     id: self.next_id(),
                     name: token,
                     method,
+                    parent: self.current_var,
+                    is_borrow
                 })
             }
             SingleChar('(') => {

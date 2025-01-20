@@ -1,10 +1,11 @@
 use crate::core::interpreter::Interpreter;
-use crate::core::memory::{Function, Memory};
+use crate::core::memory::{Function, Memory, Metadata};
 use crate::core::parser::{Expr, Stmt};
 use crate::core::scanner::{Token, TokenType, Value};
 use crate::core::types::type_check;
 use std::cell::RefCell;
 use std::rc::Rc;
+use coloredpp::Colorize;
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -54,7 +55,7 @@ impl<'a> Expr<'a> {
 
         // bulk set variables to avoid multiple borrow_mut calls
         for (name, value) in locals {
-            meme.set_stack_var(name, value);
+            meme.set_stack_var(name, value, Metadata::Var {is_const: true});
         }
 
         // use pre-allocated interpreter for the function
@@ -197,36 +198,74 @@ impl<'a> Expr<'a> {
                     Value::Nil
                 }
             }
-            Expr::Var { name, method, .. } => {
-                let mem_ref = mem.borrow();
-                if let Some(Value::HeapRef(id)) = mem_ref.get_stack_var(name.lexeme) {
-                    if let Some(heap_obj) = mem_ref.heap.get(&id) {
+            // handle variable calls
+            Expr::Var { name, method, is_borrow, .. } => {
+                // create a memory reference
+                let mut mem_ref = mem.borrow_mut();
+                // check if name exists on the stack
+                if let Some((Value::HeapRef(addr), _)) = mem_ref.get_stack_var(name.lexeme) {
+                    // get the value of the variable from the heap, by the address stored on the stack
+                    if let Some(heap_obj) = mem_ref.heap.get(&addr) {
+                        // extract value from heap object
                         let value = heap_obj.borrow().value.clone();
 
+                        // apply method if variable has one
                         if let Some((method_name, args)) = method {
                             drop(mem_ref);
                             return self.handle_method(value, method_name, args, mem);
                         }
+                        // if value isn't borrowed, transfer the ownership to the new owner, if called inside the variable
+                        if !is_borrow {
+                            mem_ref.free_heap(addr);
+                            mem_ref.allocate_heap(Value::Nil);
+                        }
+                        // return the value
                         return value;
                     }
+
+                    // if variable can't be found on the heap, return a null value, for now
+                    println!("{}", format!("warning: no variable '{}' was found on the heap", name.lexeme).yellow().bold());
+                    return Value::Nil
                 }
-                mem_ref.get_stack_var(name.lexeme).unwrap_or(Value::Nil)
+                // if variable can't be found on the stack, return a null value, for now
+                println!("{}", format!("warning: no variable '{}' was found on the stack", name.lexeme).yellow().bold());
+               Value::Nil
             }
+            // handle assigning operations
             Expr::Assign { name, value, .. } => {
+                // evaluate the value expression
                 let eval_value = value.eval(Rc::clone(&mem));
+                // get the mutable reference to the memory
                 let mut mem = mem.borrow_mut();
 
-                if let Some(Value::HeapRef(id)) = mem.get_stack_var(name.lexeme) {
-                    if let Some(heap_obj) = mem.heap.get(&id) {
+                // check if target variable exists on the stack
+                if let Some((Value::HeapRef(addr), metadata)) = mem.get_stack_var(name.lexeme) {
+                    // get the value of the variable from the heap, by the stack address
+                    if let Some(heap_obj) = mem.heap.get(&addr) {
                         let mut heap_value = heap_obj.borrow_mut();
-                        if heap_value.value.same_type(&eval_value) {
-                            heap_value.value = eval_value.clone();
+
+                        // check if variable is constant
+                        if let Metadata::Var { is_const, .. } = metadata {
+                            if is_const {
+                                println!("{}", format!("warning: can't assign to a constant variable '{}'", name.lexeme).yellow().bold());
+                                return Value::Nil;
+                            }
                         }
+
+                        // if types are checked, assign a new value
+                        if heap_value.value.same_type(&eval_value) {
+                            // assign a new heap value
+                            heap_value.value = eval_value.clone();
+                            return eval_value;
+                        }
+                        // if not, throw the warning
+                        eprintln!("{}", format!("warning: variable '{}' was not same type as attempted assign value", name.lexeme).yellow().bold());
+                        return Value::Nil;
                     }
-                } else {
-                    let var_id = mem.allocate_heap(eval_value.clone());
-                    mem.set_stack_var(name.lexeme, Value::HeapRef(var_id));
                 }
+                // if variable can't be found, declare a new dynamically typed variable
+                let var_id = mem.allocate_heap(eval_value.clone());
+                mem.set_stack_var(name.lexeme, Value::HeapRef(var_id), Metadata::Null);
                 eval_value
             }
             Expr::Null => Value::Nil,

@@ -25,9 +25,17 @@ pub struct HeapValue<'a> {
 }
 
 #[derive(Clone, Debug)]
+pub enum Metadata {
+    Var{
+        is_const: bool,
+    },
+    Null,
+}
+
+#[derive(Clone, Debug)]
 pub struct Memory<'a> {
     // stack frames
-    pub stack: Vec<Rc<RefCell<HashMap<&'a str, Value<'a>>>>>,
+    pub stack: Vec<Rc<RefCell<HashMap<&'a str, (Value<'a>, Metadata)>>>>,
     // heap memory
     pub heap: HashMap<usize, Rc<RefCell<HeapValue<'a>>>>,
     // environment
@@ -66,24 +74,24 @@ impl<'a> Memory<'a> {
 
     /// sets a var in the current stack frame
     #[inline]
-    pub fn set_stack_var(&mut self, name: &'a str, value: Value<'a>) {
+    pub fn set_stack_var(&mut self, name: &'a str, value: Value<'a>, meta: Metadata) {
         if let Some(frame) = self.stack.last() {
             if let Value::HeapRef(id) = &value {
                 if let Some(obj) = self.heap.get(id) {
                     if obj.borrow().borrowed_by.is_empty() {
-                        frame.borrow_mut().insert(name, value);
+                        frame.borrow_mut().insert(name, (value, meta));
                         return;
                     }
                     return;
                 }
             }
-            frame.borrow_mut().insert(name, value);
+            frame.borrow_mut().insert(name, (value, meta));
         }
     }
 
     /// gets a vars value from the stack
     #[inline]
-    pub fn get_stack_var(&self, name: &'a str) -> Option<Value<'a>> {
+    pub fn get_stack_var(&self, name: &'a str) -> Option<(Value<'a>, Metadata)> {
         self.stack
             .iter()
             .rev()
@@ -94,7 +102,7 @@ impl<'a> Memory<'a> {
     #[inline]
     pub fn get_function(&self, name: &'a str) -> Option<Function<'a>> {
         self.get_stack_var(name).and_then(|val| {
-            if let Value::HeapRef(id) = val {
+            if let Value::HeapRef(id) = val.0 {
                 self.heap.get(&id).and_then(|obj| {
                     if let Value::Function(func) = &obj.borrow().value {
                         Some(func.clone())
@@ -168,6 +176,6 @@ impl<'a> Memory<'a> {
     /// adds a function to the memory
     pub fn add_function(&mut self, name: &'a str, function: Function<'a>) {
         let id = self.allocate_heap(Value::Function(function));
-        self.set_stack_var(name, Value::HeapRef(id));
+        self.set_stack_var(name, Value::HeapRef(id), Metadata::Null);
     }
 }

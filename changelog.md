@@ -1,5 +1,11 @@
 # Changelog
 
+#### 0.0.6
+
+- added constant variables
+- updated ownership and borrowing
+- fixed minor issues
+
 #### 0.0.5
 
 - implemented loop and function optimizations
