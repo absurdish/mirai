@@ -1,3 +1,13 @@
-int i = 5
-int x = i
-print x
+i64 sum = 0
+i64 i = 0
+
+i64 add(i64 a, i64 b) {
+    a + b
+}
+
+while i < 10000 {
+    sum = add(sum, i)
+    i = i + 1
+}
+
+print sum
