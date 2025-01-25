@@ -1,17 +1,21 @@
-use std::fmt::{self, Display, Formatter};
+// scanner, aka tokenizer: collects tokens from the input source
 
+use std::fmt::{self, Display, Formatter};
 use unicode_xid::UnicodeXID;
 
 use super::{
-    Ast, AstError, FltSize, IntSize, LitValue, Token, TokenType::{self, *}, KEYWORDS
+    Ast, AstError, FltSize, IntSize, LitValue, Token,
+    TokenType::{self, *},
+    KEYWORDS,
 };
-
-
 
 impl Display for AstError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Self::InvalidChar(c) => write!(f, "unknown character '{}'", c),
+            Self::MissingToken(t) => write!(f, "expected token '{}'", t),
+            Self::UnexpectedToken(t) => write!(f, "unexpected token '{}'", t),
+            Self::UnreachableToken(t) => write!(f, "failed to reach the token '{}'", t),
         }
     }
 }

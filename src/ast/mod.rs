@@ -1,5 +1,9 @@
-mod scan;
+pub mod lexp;
+pub mod scan;
+pub mod stmt;
+pub mod texp;
 use smallvec::SmallVec;
+use stmt::Stmt;
 
 /// the component that the source code is parsed into using the scanner and is used for building the AST
 #[derive(Debug, Clone, PartialEq)]
@@ -72,7 +76,7 @@ pub enum FltSize {
 }
 
 /// list of keywords in the language
-const KEYWORDS: &[&str] = &[
+pub const KEYWORDS: &[&str] = &[
     // statement keywords
     "if", "else", "while", "return", "break", "print", // type keywords
     "int", "unt", "flt", "bool", "str", "nil", "void", // reserver keywords
@@ -85,6 +89,9 @@ const BUFFER_SIZE: usize = 128;
 #[derive(Debug)]
 pub enum AstError {
     InvalidChar(char),
+    UnexpectedToken(&'static str),
+    MissingToken(&'static str),
+    UnreachableToken(&'static str),
 }
 
 /// AST struct for managing tokenization and parsing
@@ -127,9 +134,96 @@ impl Ast {
     }
 
     /// starts the parsing process
-    pub fn start(&mut self) -> Result<(), AstError> {
+    pub fn start(&mut self) -> Result<Vec<Stmt>, AstError> {
         self.tokenize()?;
+        self.parse()
+    }
 
-        Ok(())
+    //
+    // parser helper functions
+    //
+
+    /// returns new id for the expressions
+    #[inline(always)]
+    pub fn next_id(&mut self) -> usize {
+        let id = self.id;
+        self.id += 1;
+        id
+    }
+
+    #[inline(always)]
+    pub fn consumes(&mut self, token: TokenType) -> Result<Token, AstError> {
+        if self.check(token) {
+            return self.advances();
+        }
+        Err(AstError::MissingToken("todo: {token}"))
+    }
+
+    #[inline(always)]
+    pub fn check(&self, token: TokenType) -> bool {
+        if self.is_at_end() {
+            return false;
+        }
+
+        if let Some(current_token) = self.tokens.get(self.current_expr) {
+            return match token {
+                TokenType::Char(c) => current_token.lexeme.chars().next() == Some(c),
+                TokenType::Chars((c1, c2)) => current_token.lexeme == &format!("{}{}", c1, c2),
+                TokenType::Keyword(kw) => current_token.lexeme == kw,
+                _ => current_token.token == token,
+            };
+        }
+
+        false
+    }
+
+    #[inline(always)]
+    pub fn match_token(&mut self, token: TokenType) -> bool {
+        if self.check(token) {
+            self.advances();
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline(always)]
+    pub fn match_any(&mut self, token_types: &[TokenType]) -> bool {
+        for token_type in token_types {
+            if self.match_token(token_type.clone()) {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[inline(always)]
+    pub fn peeks(&self) -> Result<Token, AstError> {
+        if let Some(token) = self.tokens.get(self.current_expr).cloned() {
+            return Ok(token);
+        }
+        Err(AstError::UnreachableToken("unknown"))
+    }
+
+    /// check if program has reached the end of the file
+    #[inline(always)]
+    pub fn is_at_end(&self) -> bool {
+        self.current_expr >= self.tokens.len()
+    }
+
+    #[inline(always)]
+    pub fn advances(&mut self) -> Result<Token, AstError> {
+        if !self.is_at_end() {
+            self.current_expr += 1;
+        }
+        self.prev(1)
+    }
+
+    #[inline(always)]
+    pub fn prev(&self, steps: usize) -> Result<Token, AstError> {
+        if let Some(token) = self.tokens.get(self.current_expr - steps).cloned() {
+            return Ok(token);
+        }
+        Err(AstError::UnreachableToken("unknown"))
     }
 }

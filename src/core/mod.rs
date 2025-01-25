@@ -1,3 +1,4 @@
+use crate::ast::Ast;
 use crate::core::interpreter::Interpreter;
 use crate::core::parser::Parser;
 use crate::core::resolver::Resolver;
@@ -13,18 +14,27 @@ pub mod scanner;
 pub mod types;
 
 pub fn run(input: &str) {
-    // input code tokenizer
-    let mut scanner = Scanner::new(input);
-    let tokens = scanner.start();
-    // token parser
-    let mut parser = Parser::new(&tokens);
-    let stmts = match parser.start() {
+    // // input code tokenizer
+    // let mut scanner = Scanner::new(input);
+    // let tokens = scanner.start();
+    // // token parser
+    // let mut parser = Parser::new(&tokens);
+    // let stmts = match parser.start() {
+    //     Ok(stmts) => stmts,
+    //     Err(err) => {
+    //         eprintln!("{}", err);
+    //         exit(0)
+    //     }
+    // };
+    let mut ast = Ast::new(input);
+    let stmts = match ast.start() {
         Ok(stmts) => stmts,
         Err(err) => {
-            eprintln!("{}", err);
-            exit(0)
+            eprintln!("{:?}", err);
+            exit(0);
         }
     };
+
     // handles scopes and locality
     let mut resolver = Resolver::new();
     Resolver::resolve(&mut resolver, &stmts);

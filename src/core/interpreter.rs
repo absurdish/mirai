@@ -48,7 +48,11 @@ impl<'a> Interpreter<'a> {
                 e.eval(Rc::clone(&self.memory));
             }
             Stmt::Var {
-                id, value, type_, is_const, ..
+                id,
+                value,
+                type_,
+                is_const,
+                ..
             } => {
                 self.handle_var_declaration(id.lexeme, value, type_, is_const);
             }
@@ -91,7 +95,13 @@ impl<'a> Interpreter<'a> {
     }
 
     #[inline]
-    fn handle_var_declaration(&mut self, name: &'a str, value: Expr<'a>, type_: Token<'a>, is_const: bool) {
+    fn handle_var_declaration(
+        &mut self,
+        name: &'a str,
+        value: Expr<'a>,
+        type_: Token<'a>,
+        is_const: bool,
+    ) {
         let value = match (value.eval(Rc::clone(&self.memory)), &type_.token_type) {
             (Value::Int(a), TokenType::Keyword("i64")) => Value::Int64(a as i64),
             (Value::Unt(a), TokenType::Keyword("u64")) => Value::Unt64(a as u64),
@@ -103,7 +113,7 @@ impl<'a> Interpreter<'a> {
 
         let mut mem = self.memory.borrow_mut();
         let var_id = mem.allocate_heap(value);
-        mem.set_stack_var(name, Value::HeapRef(var_id), Metadata::Var {is_const});
+        mem.set_stack_var(name, Value::HeapRef(var_id), Metadata::Var { is_const });
     }
 
     #[inline]

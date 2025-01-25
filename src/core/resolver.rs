@@ -1,5 +1,5 @@
-use crate::core::parser::{Expr, Stmt};
-use crate::core::scanner::Token;
+use crate::ast::{lexp::LExpr, stmt::Stmt, texp::TExpr, Token};
+use smallvec::SmallVec;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -33,36 +33,44 @@ impl<'a> Resolver<'a> {
     }
 
     #[inline]
-    pub fn resolve(&mut self, stmts: &[Stmt<'a>]) -> &HashMap<usize, usize> {
+    pub fn resolve(&mut self, stmts: &[Stmt]) -> &HashMap<usize, usize> {
         stmts.iter().for_each(|stmt| self.resolve_stmt(stmt));
         &self.locals
     }
 
     #[inline]
-    pub fn resolve_stmt(&mut self, stmt: &Stmt<'a>) {
+    pub fn resolve_stmt(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::Var { id, value, .. } => {
-                let name = id.lexeme;
+            Stmt::Var { name, lexpr, .. } => {
+                let name = name.lexeme;
                 self.declare(name);
-                self.resolve_expr(value);
+                self.resolve_expr(lexpr);
                 self.define(name);
             }
-            Stmt::Block { stmts, .. } => self.resolve_block(stmts),
+            Stmt::Block(stmts) => {
+                self.begin_scope();
+                stmts.iter().for_each(|stmt| self.resolve_stmt(stmt));
+                self.end_scope();
+            }
             Stmt::Expr(expr) => self.resolve_expr(expr),
             Stmt::Fn {
-                id, params, body, ..
+                name, params, body, ..
             } => {
-                self.declare(id.lexeme);
-                self.define(id.lexeme);
+                self.declare(name.lexeme);
+                self.define(name.lexeme);
                 self.resolve_function(params, body, FuncType::Function);
             }
             Stmt::Print(expr) | Stmt::Return(expr) => self.resolve_expr(expr),
-            Stmt::If { pred, body, else_b } => {
+            Stmt::If {
+                pred,
+                body,
+                else_body,
+            } => {
                 self.resolve_expr(pred);
                 self.begin_scope();
                 self.resolve_stmt(body);
                 self.end_scope();
-                if let Some(else_b) = else_b {
+                if let Some(else_b) = else_body {
                     self.begin_scope();
                     self.resolve_stmt(else_b);
                     self.end_scope();
@@ -74,21 +82,6 @@ impl<'a> Resolver<'a> {
                 self.resolve_stmt(body);
                 self.end_scope();
             }
-            Stmt::Method { params, body, .. } => {
-                let encl_func = self.current_func;
-                self.current_func = FuncType::Method;
-                self.begin_scope();
-                self.declare("self");
-                self.define("self");
-                params.iter().for_each(|(name, _)| {
-                    self.declare(name);
-                    self.define(name);
-                });
-                self.resolve_block(body);
-                self.end_scope();
-                self.current_func = encl_func;
-            }
-            Stmt::Impl { .. } | Stmt::Break => {}
             _ => {}
         }
     }
@@ -96,8 +89,8 @@ impl<'a> Resolver<'a> {
     #[inline]
     pub fn resolve_function(
         &mut self,
-        params: &[(Token<'a>, Token<'a>)],
-        body: &[Stmt<'a>],
+        params: &SmallVec<[(Token, TExpr); 4]>,
+        body: &[Stmt],
         func_type: FuncType,
     ) {
         let encl_func = self.current_func;
@@ -109,43 +102,36 @@ impl<'a> Resolver<'a> {
             self.define(param.lexeme);
         });
 
-        self.resolve_block(body);
+        self.begin_scope();
+        body.iter().for_each(|stmt| self.resolve_stmt(stmt));
         self.end_scope();
+        self.end_scope();
+
         self.current_func = encl_func;
     }
 
     #[inline]
-    pub fn resolve_expr(&mut self, expr: &Expr<'a>) {
+    pub fn resolve_expr(&mut self, expr: &LExpr) {
         match expr {
-            Expr::Var { name, id, method, .. } => {
-                if let Some((_, es)) = method {
-                    es.iter().for_each(|e| self.resolve_expr(e));
-                }
+            LExpr::Var { name, id, .. } => {
                 self.resolve_local(*id, name.lexeme);
             }
-            Expr::Assign { name, value, id } => {
-                self.resolve_expr(value);
+            LExpr::Assign { name, id, lit, .. } => {
+                self.resolve_expr(lit);
                 self.resolve_local(*id, name.lexeme);
             }
-            Expr::Binary { lhs, rhs, .. } => {
+            LExpr::Binary { lhs, rhs, .. } => {
                 self.resolve_expr(rhs);
                 self.resolve_expr(lhs);
             }
-            Expr::Unary { rhs, .. } => self.resolve_expr(rhs),
-            Expr::Call { name, args, .. } => {
+            LExpr::Unary { lhs, .. } => self.resolve_expr(lhs),
+            LExpr::Call { name, args, .. } => {
                 self.resolve_expr(name);
                 args.iter().for_each(|arg| self.resolve_expr(arg));
             }
-            Expr::Grouping { expr, .. } => self.resolve_expr(expr),
+            LExpr::Grouping { expr, .. } => self.resolve_expr(expr),
             _ => {}
         }
-    }
-
-    #[inline]
-    pub fn resolve_block(&mut self, statements: &[Stmt<'a>]) {
-        self.begin_scope();
-        statements.iter().for_each(|stmt| self.resolve_stmt(stmt));
-        self.end_scope();
     }
 
     #[inline]
