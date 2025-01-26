@@ -3,9 +3,24 @@ use crate::ast::stmt::Stmt;
 use crate::ast::texp::TExpr;
 use crate::ast::LitValue;
 use crate::core::memory::{Function, Memory, Metadata};
-use crate::core::types::type_check;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+#[derive(Debug)]
+pub enum RunTimeError {
+    /// error occurs when trying to divide number by zero
+    DivisionByZero,
+    /// functions argument size doesn't match parameters
+    FuncArgSize(&'static str),
+    /// operation hasn't yet been implemented
+    UnimplementedOperation(&'static str),
+    /// undeclared variable error
+    VariableNotFound(&'static str),
+    /// can't assign to the immutable value
+    ImmutableAssignement(&'static str),
+    /// type error between two literal values
+    TypesDontMatch(&'static str),
+}
 
 #[derive(Debug)]
 pub struct LoopInfo {
@@ -34,19 +49,23 @@ impl Interpreter {
     }
 
     #[inline]
-    pub fn start(&mut self, stmts: Vec<Stmt>) -> Rc<RefCell<Memory>> {
+    pub fn start(&mut self, stmts: Vec<Stmt>) -> Result<Rc<RefCell<Memory>>, RunTimeError> {
         for stmt in stmts {
-            self.statement(stmt);
+            self.statement(stmt)?;
         }
-        Rc::clone(&self.memory)
+        Ok(Rc::clone(&self.memory))
     }
 
     #[inline]
-    pub fn statement(&mut self, stmt: Stmt) {
+    pub fn statement(&mut self, stmt: Stmt) -> Result<(), RunTimeError> {
         match stmt {
-            Stmt::Print(e) => println!("{:?}", e.eval(Rc::clone(&self.memory))),
+            Stmt::Print(e) => {
+                println!("{:?}", e.eval(Rc::clone(&self.memory)));
+                Ok(())
+            }
             Stmt::Expr(e) => {
-                e.eval(Rc::clone(&self.memory));
+                e.eval(Rc::clone(&self.memory))?;
+                Ok(())
             }
             Stmt::Var {
                 name,
@@ -54,7 +73,8 @@ impl Interpreter {
                 texpr,
                 is_const,
             } => {
-                self.handle_var_declaration(name.lexeme, lexpr, texpr, is_const);
+                self.handle_var_declaration(name.lexeme, lexpr, texpr, is_const)?;
+                Ok(())
             }
             Stmt::Fn {
                 name,
@@ -69,25 +89,35 @@ impl Interpreter {
                     body,
                 };
                 self.memory.borrow_mut().add_function(name.lexeme, function);
+                Ok(())
             }
-            Stmt::Block(stmts) => self.handle_block(stmts),
+            Stmt::Block(stmts) => {
+                self.handle_block(stmts)?;
+                Ok(())
+            }
             Stmt::If {
                 pred,
                 body,
                 else_body,
-            } => self.handle_if(pred, *body, else_body),
-            Stmt::While { pred, body } => self.handle_while(pred, *body),
+            } => {
+                self.handle_if(pred, *body, else_body)?;
+                Ok(())
+            }
+            Stmt::While { pred, body } => {
+                self.handle_while(pred, *body)?;
+                Ok(())
+            }
             Stmt::Break => {
                 self.memory
                     .borrow_mut()
-                    .env
                     .specials
                     .insert("break", LExpr::Null);
+                Ok(())
             }
             Stmt::Return(e) => {
-                self.memory.borrow_mut().env.specials.insert("return", e);
+                self.memory.borrow_mut().specials.insert("return", e);
+                Ok(())
             }
-            _ => {}
         }
     }
 
@@ -96,45 +126,46 @@ impl Interpreter {
         &mut self,
         name: &'static str,
         value: LExpr,
-        type_: TExpr,
+        _: TExpr,
         is_const: bool,
-    ) {
-        let value = match (value.eval(Rc::clone(&self.memory)), type_.lexeme()) {
-            (LitValue::Int(a), "int") => LitValue::Int(a),
-            (LitValue::Unt(a), "unt") => LitValue::Unt(a),
-            (v, _) => {
-                type_check(type_, &v);
-                v
-            }
-        };
+    ) -> Result<(), RunTimeError> {
+        let value = value.eval(Rc::clone(&self.memory));
 
         let mut mem = self.memory.borrow_mut();
-        let var_id = mem.allocate_heap(value);
+        let var_id = mem.allocate_heap(value?);
         mem.set_stack_var(name, LitValue::HeapRef(var_id), Metadata::Var { is_const });
+        Ok(())
     }
 
     #[inline]
-    fn handle_block(&mut self, stmts: Vec<Stmt>) {
+    fn handle_block(&mut self, stmts: Vec<Stmt>) -> Result<(), RunTimeError> {
         self.memory.borrow_mut().push_stack_frame();
         for stmt in stmts {
-            self.statement(stmt);
+            self.statement(stmt)?;
         }
         self.memory.borrow_mut().pop_stack_frame();
+        Ok(())
     }
 
     #[inline]
-    fn handle_if(&mut self, pred: LExpr, body: Stmt, else_b: Option<Box<Stmt>>) {
-        let is_truthy = pred.eval(Rc::clone(&self.memory)).is_truthy();
+    fn handle_if(
+        &mut self,
+        pred: LExpr,
+        body: Stmt,
+        else_b: Option<Box<Stmt>>,
+    ) -> Result<(), RunTimeError> {
+        let is_truthy = pred.eval(Rc::clone(&self.memory))?.is_truthy();
 
         if is_truthy {
-            self.statement(body);
+            self.statement(body)?;
         } else if let Some(else_stmt) = else_b {
-            self.statement(*else_stmt);
+            self.statement(*else_stmt)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn handle_while(&mut self, pred: LExpr, body: Stmt) {
+    fn handle_while(&mut self, pred: LExpr, body: Stmt) -> Result<(), RunTimeError> {
         if let Some(loop_info) = self.analyze_loop(&pred, &body) {
             if loop_info.is_numeric && loop_info.counter.is_some() && !loop_info.has_function_calls
             {
@@ -143,24 +174,25 @@ impl Interpreter {
         }
 
         // regular loop execution
-        while pred.eval(Rc::clone(&self.memory)).is_truthy() {
+        while pred.eval(Rc::clone(&self.memory))?.is_truthy() {
             match &body {
                 Stmt::Block(stmts) => {
                     for stmt in stmts {
-                        self.statement(stmt.clone());
+                        self.statement(stmt.clone())?;
                         if matches!(stmt, Stmt::Break) {
-                            return;
+                            return Ok(());
                         }
                     }
                 }
                 _ => {
-                    if self.memory.borrow().env.specials.contains_key("break") {
-                        return;
+                    if self.memory.borrow().specials.contains_key("break") {
+                        return Ok(());
                     }
-                    self.statement(body.clone());
+                    self.statement(body.clone())?;
                 }
             }
         }
+        Ok(())
     }
 
     #[inline]
@@ -241,7 +273,12 @@ impl Interpreter {
     }
 
     #[inline]
-    fn execute_optimized_loop(&mut self, info: &LoopInfo, pred: &LExpr, body: &Stmt) {
+    fn execute_optimized_loop(
+        &mut self,
+        info: &LoopInfo,
+        pred: &LExpr,
+        body: &Stmt,
+    ) -> Result<(), RunTimeError> {
         if let Some(iterations) = info.iterations {
             let mut mem = self.memory.borrow_mut();
             let counter_name = info.counter.unwrap();
@@ -273,9 +310,10 @@ impl Interpreter {
             }
         } else {
             // fall back to normal execution
-            while pred.eval(Rc::clone(&self.memory)).is_truthy() {
-                self.statement(body.clone());
+            while pred.eval(Rc::clone(&self.memory))?.is_truthy() {
+                self.statement(body.clone())?;
             }
         }
+        Ok(())
     }
 }

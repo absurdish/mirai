@@ -11,7 +11,6 @@ pub enum VarState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FuncType {
     Function,
-    Method,
     None,
 }
 

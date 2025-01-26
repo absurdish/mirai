@@ -1,9 +1,9 @@
 use smallvec::SmallVec;
 
+use crate::ast::lexp::LExpr;
 use crate::ast::stmt::Stmt;
 use crate::ast::texp::TExpr;
 use crate::ast::{LitValue, Token};
-use crate::core::env::Env;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::process::exit;
@@ -39,8 +39,7 @@ pub struct Memory {
     pub stack: Vec<Rc<RefCell<HashMap<&'static str, (LitValue, Metadata)>>>>,
     // heap memory
     pub heap: HashMap<usize, Rc<RefCell<HeapValue>>>,
-    // environment
-    pub env: Env,
+    pub specials: HashMap<&'static str, LExpr>,
     // next heap id
     next: usize,
 }
@@ -52,7 +51,7 @@ impl Memory {
         Self {
             stack: vec![Rc::new(RefCell::new(HashMap::with_capacity(32)))],
             heap: HashMap::with_capacity(32),
-            env: Env::new(),
+            specials: HashMap::new(),
             next: 0,
         }
     }
@@ -105,12 +104,11 @@ impl Memory {
         self.get_stack_var(name).and_then(|val| {
             if let LitValue::HeapRef(id) = val.0 {
                 self.heap.get(&id).and_then(|obj| {
-                    // if let LitValue::Function(func) = &obj.borrow().value {
-                    //     Some(func.clone())
-                    // } else {
-                    //     None
-                    // }
-                    None
+                    if let LitValue::Fun(func) = &obj.borrow().value {
+                        Some(*func.clone())
+                    } else {
+                        None
+                    }
                 })
             } else {
                 None
@@ -177,7 +175,7 @@ impl Memory {
 
     /// adds a function to the memory
     pub fn add_function(&mut self, name: &'static str, function: Function) {
-        // let id = self.allocate_heap(Value::Function(function));
-        // self.set_stack_var(name, Value::HeapRef(id), Metadata::Null);
+        let id = self.allocate_heap(LitValue::Fun(Box::new(function)));
+        self.set_stack_var(name, LitValue::HeapRef(id), Metadata::Null);
     }
 }

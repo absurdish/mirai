@@ -2,7 +2,6 @@ use crate::ast::Ast;
 use crate::core::interpreter::Interpreter;
 use crate::core::resolver::Resolver;
 use std::process::exit;
-pub mod env;
 pub mod eval;
 pub mod interpreter;
 pub mod memory;
@@ -24,7 +23,9 @@ pub fn run(input: &'static str) {
     Resolver::resolve(&mut resolver, &stmts);
     // interpreters the code
     let mut interpreter = Interpreter::new();
-    interpreter.start(stmts);
+    if let Err(e) = interpreter.start(stmts) {
+        eprintln!("error: {:?}", e)
+    }
     // memory testing code
     //
     // let mem = interpreter.memory.borrow();

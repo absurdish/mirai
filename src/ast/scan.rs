@@ -4,7 +4,7 @@ use std::fmt::{self, Display, Formatter};
 use unicode_xid::UnicodeXID;
 
 use super::{
-    Ast, AstError, FltSize, IntSize, LitValue, Token,
+    Ast, AstError, LitValue, Token,
     TokenType::{self, *},
     KEYWORDS,
 };

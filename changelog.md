@@ -1,5 +1,11 @@
 # Changelog
 
+#### 0.0.7
+
+- internal redesign
+- updated type system and error handling
+- better optimizations and safety
+
 #### 0.0.6
 
 - added constant variables

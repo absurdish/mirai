@@ -48,7 +48,6 @@ pub enum LExpr {
         lit: LitValue,
     },
     Null,
-    // TODO: Type {id: usize, typ: TypeValue }
 }
 
 /// possible kinds of assignements

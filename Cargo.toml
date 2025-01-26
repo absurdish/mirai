@@ -4,7 +4,6 @@ version = "0.0.6"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.5.23", features = ["derive"] }
 coloredpp = "0.3.0"
 memmap2 = "0.9.5"
 unicode-xid = "0.2.6"

@@ -6,15 +6,6 @@ pub enum TExpr {
     Deref(Box<TExpr>),
 }
 
-impl TExpr {
-    pub fn lexeme(&self) -> &'static str {
-        match self {
-            TExpr::Literal(e) => e,
-            TExpr::Deref(e) => e.lexeme(),
-        }
-    }
-}
-
 impl Ast {
     #[inline]
     pub fn texpr(&mut self) -> Result<TExpr, AstError> {
