@@ -5,6 +5,8 @@ pub mod texp;
 use smallvec::SmallVec;
 use stmt::Stmt;
 
+use crate::core::memory::Function;
+
 /// the component that the source code is parsed into using the scanner and is used for building the AST
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
@@ -37,11 +39,11 @@ pub enum TokenType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum LitValue {
     /// signed integer type
-    Int(IntSize),
+    Int(i32),
     /// unsigned integer type
-    Unt(UntSize),
+    Unt(u32),
     /// floating point number type
-    Flt(FltSize),
+    Flt(f32),
     /// string type
     Str(String),
     /// boolean type
@@ -50,6 +52,27 @@ pub enum LitValue {
     Void,
     /// empty/null value
     Nil,
+    HeapRef(usize),
+    Fun(Box<Function>),
+}
+
+impl LitValue {
+    pub fn same_type(&self, v2: &LitValue) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(v2)
+    }
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            LitValue::Nil => false,
+            LitValue::Void => false,
+            LitValue::Flt(a) => *a != 0.0,
+            LitValue::Fun(_) => false,
+            LitValue::Str(a) => a.len() != 0,
+            LitValue::Unt(a) => *a != 0,
+            LitValue::Bool(a) => *a,
+            LitValue::HeapRef(_) => false,
+            LitValue::Int(a) => *a != 0,
+        }
+    }
 }
 
 /// signed integer type variations

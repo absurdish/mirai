@@ -1,7 +1,7 @@
 use super::{lexp::LExpr, texp::TExpr, Ast, AstError, Token, TokenType::*};
 use smallvec::SmallVec;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Stmt {
     Print(LExpr),
     Var {

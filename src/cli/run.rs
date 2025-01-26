@@ -1,63 +1,42 @@
 use crate::core::run;
 use crate::throw;
 use coloredpp::Colorize;
-use memmap2::Mmap;
-use std::fs::File;
+use std::fs;
 use std::path::Path;
-use std::str::from_utf8;
 
 /// `mirai run <target> [options]`
-///
-///  - `--dev` // enables dev mode
-pub fn cmd_run(target: String, args: Vec<String>) {
+pub fn cmd_run(target: &str, args: Vec<String>) {
     let valid_extensions = ["mirai", "mir", "mr"];
-    let path = Path::new(&target);
+    let path = Path::new(target);
     let is_dev = args.contains(&String::from("--dev"));
 
-    // check the file extension
-    if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-        if !valid_extensions.contains(&extension) {
-            throw!(format!("'{}' has an invalid extension, allowed extensions include '.mirai', '.mir' and '.mr'", target));
-            // - would you like to rename `target` to `{target.split(".")[1]}.mirai`?
-            return;
+    // Validate file extension
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if !valid_extensions.contains(&ext) {
+            throw!(format!("Invalid extension '{}' for target '{}'", ext, target));
         }
     } else {
-        throw!(format!("'{}' is not a valid file.", target));
-        return;
+        throw!(format!("'{}' has no file extension", target));
     }
 
-    // open and read the target file
-    match File::open(&target) {
-        Ok(file) => match unsafe { Mmap::map(&file) } {
-            Ok(map) => {
-                // print initial text
-                print!("{}", "running interpreter".yellow().bold());
-                if is_dev {
-                    println!("{}{}", " in ".yellow().bold(), "dev mode".red().bold());
-                } else {
-                    println!();
-                }
-                // print link to the file
-                println!("{}\n", format!("{}:{}:{}", target, 0, 0));
+    // Read file contents
+    let content = match fs::read_to_string(target) {
+        Ok(c) => c,
+        Err(e) => {
+            throw!(format!("Failed to read '{}': {}", target, e));
+            return;
+        }
+    };
 
-                // convert memory-map to the utf-8 format
-                let input = match from_utf8(&map) {
-                    Ok(input) => input,
-                    Err(_) => {
-                        throw!("failed to convert to UTF-8");
-                        unreachable!();
-                    }
-                };
-                // run the interpreter with the input
-                // - pass the configuration options
-                run(input);
-            }
-            Err(_) => {
-                throw!(format!("failed to open '{}' (memory-map)", target))
-            },
-        },
-        Err(err) => {
-            throw!(format!("failed to read file '{}': {}", target, err))
-        },
+    // Convert to 'static str using intentional memory leak
+    let static_str: &'static str = Box::leak(content.into_boxed_str());
+
+    // Print execution header
+    println!("{}", "running interpreter".yellow().bold());
+    if is_dev {
+        println!("{} {}", "[DEV MODE]".red().bold(), static_str.len());
     }
+    
+    // Pass static reference to AST
+    run(static_str);
 }

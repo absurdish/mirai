@@ -1,37 +1,38 @@
+use crate::ast::lexp::LExpr;
+use crate::ast::stmt::Stmt;
 use crate::core::memory::Memory;
-use crate::core::parser::{Expr, Stmt};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ApplyKind<'a> {
+pub enum ApplyKind {
     // normal types like int, str, f64...
-    Normal(&'a str),
+    Normal(&'static str),
     // Compound and other kinds will be added in the future
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Method<'a> {
-    pub name: &'a str,
-    pub applies: ApplyKind<'a>,
-    pub type_: &'a str,
-    pub params: Vec<(&'a str, &'a str)>,
-    pub body: Rc<Vec<Stmt<'a>>>,
+pub struct Method {
+    pub name: &'static str,
+    pub applies: ApplyKind,
+    pub type_: &'static str,
+    pub params: Vec<(&'static str, &'static str)>,
+    pub body: Rc<Vec<Stmt>>,
 }
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub struct Env<'a> {
+pub struct Env {
     // linked std paths, files, packages, ...
-    linked_mods: HashMap<&'a str, Rc<RefCell<Memory<'a>>>>,
+    linked_mods: HashMap<&'static str, Rc<RefCell<Memory>>>,
     // (type, [method1, method2, ...])
-    methods: HashMap<&'a str, Method<'a>>,
+    methods: HashMap<&'static str, Method>,
     // used for returns and breaks
-    pub specials: HashMap<&'a str, Expr<'a>>,
+    pub specials: HashMap<&'static str, LExpr>,
 }
 
-impl<'a> Env<'a> {
+impl Env {
     pub fn new() -> Self {
         Self {
             linked_mods: HashMap::new(),
@@ -40,11 +41,11 @@ impl<'a> Env<'a> {
         }
     }
 
-    pub fn define_method(&mut self, name: &'a str, method: Method<'a>) {
+    pub fn define_method(&mut self, name: &'static str, method: Method) {
         self.methods.insert(name, method);
     }
 
-    pub fn get_method(&mut self, name: &'a str) -> Option<&Method<'a>> {
+    pub fn get_method(&mut self, name: &'static str) -> Option<&Method> {
         self.methods.get(&name)
     }
 }

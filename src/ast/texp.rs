@@ -1,9 +1,18 @@
 use super::{Ast, AstError, TokenType};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TExpr {
     Literal(&'static str),
     Deref(Box<TExpr>),
+}
+
+impl TExpr {
+    pub fn lexeme(&self) -> &'static str {
+        match self {
+            TExpr::Literal(e) => e,
+            TExpr::Deref(e) => e.lexeme(),
+        }
+    }
 }
 
 impl Ast {

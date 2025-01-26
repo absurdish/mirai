@@ -1,31 +1,15 @@
 use crate::ast::Ast;
 use crate::core::interpreter::Interpreter;
-use crate::core::parser::Parser;
 use crate::core::resolver::Resolver;
-use crate::core::scanner::Scanner;
 use std::process::exit;
 pub mod env;
 pub mod eval;
 pub mod interpreter;
 pub mod memory;
-pub mod parser;
 pub mod resolver;
-pub mod scanner;
 pub mod types;
 
-pub fn run(input: &str) {
-    // // input code tokenizer
-    // let mut scanner = Scanner::new(input);
-    // let tokens = scanner.start();
-    // // token parser
-    // let mut parser = Parser::new(&tokens);
-    // let stmts = match parser.start() {
-    //     Ok(stmts) => stmts,
-    //     Err(err) => {
-    //         eprintln!("{}", err);
-    //         exit(0)
-    //     }
-    // };
+pub fn run(input: &'static str) {
     let mut ast = Ast::new(input);
     let stmts = match ast.start() {
         Ok(stmts) => stmts,

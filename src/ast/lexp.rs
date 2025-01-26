@@ -4,7 +4,7 @@ use super::{
 };
 
 /// literal expressions that than can be evaluated into the literal values
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum LExpr {
     /// assign operator assigns literal values to the already defined variables
     Assign {
@@ -14,7 +14,10 @@ pub enum LExpr {
         kind: AssignKind,
     },
     /// variable holding expression
-    Var { id: usize, name: Token },
+    Var {
+        id: usize,
+        name: Token,
+    },
     /// function caller
     Call {
         id: usize,
@@ -35,14 +38,21 @@ pub enum LExpr {
         rhs: Box<LExpr>,
     },
     /// grouping: ({lexpr})
-    Grouping { id: usize, expr: Box<LExpr> },
+    Grouping {
+        id: usize,
+        expr: Box<LExpr>,
+    },
     /// literal value
-    Value { id: usize, lit: LitValue },
+    Value {
+        id: usize,
+        lit: LitValue,
+    },
+    Null,
     // TODO: Type {id: usize, typ: TypeValue }
 }
 
 /// possible kinds of assignements
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum AssignKind {
     Eq,    // id = value
     Plus,  // id += value
@@ -94,7 +104,7 @@ impl Ast {
                 id: self.next_id(),
                 op: self.prev(1)?,
                 lhs: Box::new(self.call()?),
-            })
+            });
         }
         self.call()
     }
@@ -136,6 +146,7 @@ impl Ast {
                 // handle assignements
                 match self.peeks()?.token {
                     TokenType::Char(c) if c == '=' => {
+                        self.advances()?;
                         return Ok(LExpr::Assign {
                             id: self.next_id(),
                             name,
@@ -153,6 +164,7 @@ impl Ast {
                             ':' => kind = AssignKind::Dynamic,
                             _ => {}
                         }
+                        self.advances()?;
                         return Ok(LExpr::Assign {
                             id: self.next_id(),
                             name,

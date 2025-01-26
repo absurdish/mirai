@@ -132,13 +132,13 @@ impl Ast {
 
                 // TODO: implement auto-resizing
                 let value = if is_float {
-                    LitValue::Flt(FltSize::F32(
+                    LitValue::Flt(
                         lexeme.parse::<f32>().expect("failed to unwrap a number"),
-                    ))
+                    )
                 } else {
-                    LitValue::Int(IntSize::I32(
+                    LitValue::Int(
                         lexeme.parse::<i32>().expect("failed to unwrap a number"),
-                    ))
+                    )
                 };
                 self.push(Literal(value.clone()), Some(value));
             }

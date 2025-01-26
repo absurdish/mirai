@@ -1,6 +1,9 @@
+use smallvec::SmallVec;
+
+use crate::ast::stmt::Stmt;
+use crate::ast::texp::TExpr;
+use crate::ast::{LitValue, Token};
 use crate::core::env::Env;
-use crate::core::parser::Stmt;
-use crate::core::scanner::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::process::exit;
@@ -8,44 +11,42 @@ use std::rc::Rc;
 
 /// represents a function stored in memory.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Function<'a> {
-    pub name: &'a str,
-    pub type_: &'a str,
-    pub params: Vec<(&'a str, &'a str)>,
-    pub body: Rc<Vec<Stmt<'a>>>,
+pub struct Function {
+    pub name: Token,
+    pub texpr: TExpr,
+    pub body: Vec<Stmt>,
+    pub params: SmallVec<[(Token, TExpr); 4]>,
 }
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub struct HeapValue<'a> {
-    pub value: Value<'a>,
+pub struct HeapValue {
+    pub value: LitValue,
     // owner for borrowing semantics
-    owner: Option<Rc<RefCell<Memory<'a>>>>,
-    borrowed_by: Vec<Rc<RefCell<Memory<'a>>>>,
+    owner: Option<Rc<RefCell<Memory>>>,
+    borrowed_by: Vec<Rc<RefCell<Memory>>>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Metadata {
-    Var{
-        is_const: bool,
-    },
+    Var { is_const: bool },
     Null,
 }
 
 #[derive(Clone, Debug)]
-pub struct Memory<'a> {
+pub struct Memory {
     // stack frames
-    pub stack: Vec<Rc<RefCell<HashMap<&'a str, (Value<'a>, Metadata)>>>>,
+    pub stack: Vec<Rc<RefCell<HashMap<&'static str, (LitValue, Metadata)>>>>,
     // heap memory
-    pub heap: HashMap<usize, Rc<RefCell<HeapValue<'a>>>>,
+    pub heap: HashMap<usize, Rc<RefCell<HeapValue>>>,
     // environment
-    pub env: Env<'a>,
+    pub env: Env,
     // next heap id
     next: usize,
 }
 
 #[allow(dead_code)]
-impl<'a> Memory<'a> {
+impl Memory {
     // initializes memory instance
     pub fn new() -> Self {
         Self {
@@ -74,9 +75,9 @@ impl<'a> Memory<'a> {
 
     /// sets a var in the current stack frame
     #[inline]
-    pub fn set_stack_var(&mut self, name: &'a str, value: Value<'a>, meta: Metadata) {
+    pub fn set_stack_var(&mut self, name: &'static str, value: LitValue, meta: Metadata) {
         if let Some(frame) = self.stack.last() {
-            if let Value::HeapRef(id) = &value {
+            if let LitValue::HeapRef(id) = &value {
                 if let Some(obj) = self.heap.get(id) {
                     if obj.borrow().borrowed_by.is_empty() {
                         frame.borrow_mut().insert(name, (value, meta));
@@ -91,7 +92,7 @@ impl<'a> Memory<'a> {
 
     /// gets a vars value from the stack
     #[inline]
-    pub fn get_stack_var(&self, name: &'a str) -> Option<(Value<'a>, Metadata)> {
+    pub fn get_stack_var(&self, name: &'static str) -> Option<(LitValue, Metadata)> {
         self.stack
             .iter()
             .rev()
@@ -100,15 +101,16 @@ impl<'a> Memory<'a> {
 
     /// Retrieve a function from the stack or heap
     #[inline]
-    pub fn get_function(&self, name: &'a str) -> Option<Function<'a>> {
+    pub fn get_function(&self, name: &'static str) -> Option<Function> {
         self.get_stack_var(name).and_then(|val| {
-            if let Value::HeapRef(id) = val.0 {
+            if let LitValue::HeapRef(id) = val.0 {
                 self.heap.get(&id).and_then(|obj| {
-                    if let Value::Function(func) = &obj.borrow().value {
-                        Some(func.clone())
-                    } else {
-                        None
-                    }
+                    // if let LitValue::Function(func) = &obj.borrow().value {
+                    //     Some(func.clone())
+                    // } else {
+                    //     None
+                    // }
+                    None
                 })
             } else {
                 None
@@ -118,7 +120,7 @@ impl<'a> Memory<'a> {
 
     /// allocates a value on the heap and returns a reference ID
     #[inline]
-    pub fn allocate_heap(&mut self, value: Value<'a>) -> usize {
+    pub fn allocate_heap(&mut self, value: LitValue) -> usize {
         let id = self.next;
         self.next += 1;
         self.heap.insert(
@@ -135,9 +137,9 @@ impl<'a> Memory<'a> {
     /// borrows a heap object and ensures it can be accessed safely
     pub fn borrow_heap(
         &mut self,
-        mem: Rc<RefCell<Memory<'a>>>,
+        mem: Rc<RefCell<Memory>>,
         id: usize,
-    ) -> Option<Rc<RefCell<HeapValue<'a>>>> {
+    ) -> Option<Rc<RefCell<HeapValue>>> {
         if let Some(obj) = self.heap.get(&id) {
             obj.borrow_mut().borrowed_by.push(Rc::clone(&mem));
             Some(Rc::clone(obj))
@@ -147,7 +149,7 @@ impl<'a> Memory<'a> {
     }
 
     /// returns a heap object, removing the borrowing reference
-    pub fn return_heap(&mut self, mem: Rc<RefCell<Memory<'a>>>, id: usize) {
+    pub fn return_heap(&mut self, mem: Rc<RefCell<Memory>>, id: usize) {
         if let Some(obj) = self.heap.get_mut(&id) {
             obj.borrow_mut()
                 .borrowed_by
@@ -156,7 +158,7 @@ impl<'a> Memory<'a> {
     }
 
     /// transfers ownership of a heap object to a new memory instance
-    pub fn transfer_ownership(&mut self, id: usize, new_owner: Rc<RefCell<Memory<'a>>>) {
+    pub fn transfer_ownership(&mut self, id: usize, new_owner: Rc<RefCell<Memory>>) {
         if let Some(obj) = self.heap.get_mut(&id) {
             let mut heap_value = obj.borrow_mut();
             if heap_value.borrowed_by.is_empty() {
@@ -174,8 +176,8 @@ impl<'a> Memory<'a> {
     }
 
     /// adds a function to the memory
-    pub fn add_function(&mut self, name: &'a str, function: Function<'a>) {
-        let id = self.allocate_heap(Value::Function(function));
-        self.set_stack_var(name, Value::HeapRef(id), Metadata::Null);
+    pub fn add_function(&mut self, name: &'static str, function: Function) {
+        // let id = self.allocate_heap(Value::Function(function));
+        // self.set_stack_var(name, Value::HeapRef(id), Metadata::Null);
     }
 }
