@@ -1,9 +1,14 @@
-use crate::ast::lexp::LExpr;
-use crate::ast::stmt::Stmt;
-use crate::ast::LitValue::{self, *};
-use crate::ast::Token;
-use crate::core::interpreter::Interpreter;
-use crate::core::memory::{Function, Memory, Metadata};
+use crate::ast::{
+    lexp::LExpr,
+    stmt::Stmt,
+    texp::TExpr,
+    LitValue::{self, *},
+    Token,
+};
+use crate::core::{
+    interpreter::Interpreter,
+    memory::{Function, Memory, Metadata},
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -72,12 +77,13 @@ impl LExpr {
         }
 
         // regular execution path with optimizations
-        let mut result = LitValue::Nil;
+        let mut result = Nil;
         let body_len = func.body.len();
 
         for (i, stmt) in func.body.iter().enumerate() {
             // check for early return
             if let Some(val) = mem.borrow().specials.get("return") {
+                let val = val.clone().unwrap();
                 return val
                     .eval(Rc::new(RefCell::new(meme)))?
                     .type_check(func.texpr);
@@ -175,6 +181,18 @@ impl LExpr {
                 ("*", Int(a), Int(b)) => Ok(Some(Int(a * b))),
                 ("/", Int(a), Int(b)) => Ok(Some(Int(a / b))),
                 ("%", Int(a), Int(b)) => Ok(Some(Int(a % b))),
+                //
+                ("+", Unt(a), Unt(b)) => Ok(Some(Unt(a + b))),
+                ("-", Unt(a), Unt(b)) => Ok(Some(Unt(a - b))),
+                ("*", Unt(a), Unt(b)) => Ok(Some(Unt(a * b))),
+                ("/", Unt(a), Unt(b)) => Ok(Some(Unt(a / b))),
+                ("%", Unt(a), Unt(b)) => Ok(Some(Unt(a % b))),
+                //
+                ("+", Flt(a), Flt(b)) => Ok(Some(Flt(a + b))),
+                ("-", Flt(a), Flt(b)) => Ok(Some(Flt(a - b))),
+                ("*", Flt(a), Flt(b)) => Ok(Some(Flt(a * b))),
+                ("/", Flt(a), Flt(b)) => Ok(Some(Flt(a / b))),
+                ("%", Flt(a), Flt(b)) => Ok(Some(Flt(a % b))),
                 _ => Ok(None),
             };
         }
@@ -183,6 +201,7 @@ impl LExpr {
 
     // evaluate expressions
     #[inline]
+    #[allow(unused_assignments)]
     pub fn eval(&self, mem: Rc<RefCell<Memory>>) -> Result<LitValue, RunTimeError> {
         match self {
             LExpr::Value { lit, .. } => Ok(lit.clone()),
@@ -229,13 +248,14 @@ impl LExpr {
                 let eval_value = lit.eval(Rc::clone(&mem))?;
                 // get the mutable reference to the memory
                 let mut mem = mem.borrow_mut();
-
+                let mut texpr = TExpr::Literal("nil");
                 // check if target variable exists on the stack
                 if let Some((LitValue::HeapRef(addr), metadata)) = mem.get_stack_var(name.lexeme) {
                     // get the value of the variable from the heap, by the stack address
                     if let Some(heap_obj) = mem.heap.get(&addr) {
                         let mut heap_value = heap_obj.borrow_mut();
 
+                        texpr = heap_value.texpr.clone();
                         // check if variable is constant
                         if let Metadata::Var { is_const, .. } = metadata {
                             if is_const {
@@ -243,22 +263,17 @@ impl LExpr {
                             }
                         }
 
-                        // if types are checked, assign a new value
-                        if heap_value.value.same_type(&eval_value) {
-                            // assign a new heap value
-                            heap_value.value = eval_value.clone();
-                            return Ok(eval_value);
-                        }
-                        // if not, throw the error
-                        return Err(RunTimeError::TypesDontMatch(name.lexeme));
+                        // assign a new heap value
+                        heap_value.value =
+                            eval_value.clone().type_check(heap_value.texpr.clone())?;
+                        return Ok(eval_value.type_check(heap_value.texpr.clone())?);
                     }
                 }
                 // if variable can't be found, declare a new dynamically typed variable
-                let var_id = mem.allocate_heap(eval_value.clone());
+                let var_id = mem.allocate_heap(eval_value.clone(), texpr);
                 mem.set_stack_var(name.lexeme, LitValue::HeapRef(var_id), Metadata::Null);
                 Ok(eval_value)
             }
-            LExpr::Null => Ok(LitValue::Nil),
         }
     }
 
@@ -266,11 +281,12 @@ impl LExpr {
     fn eval_unary(&self, op: &Token, rhs: &LitValue) -> Result<LitValue, RunTimeError> {
         match (op.lexeme, rhs) {
             // `-a`, minus unary operation
-            ("-", &LitValue::Int(a)) => Ok(LitValue::Int(-a)),
-            ("-", &LitValue::Flt(a)) => Ok(LitValue::Flt(-a)),
-            // TODO
-            //
-            _ => unimplemented!(),
+            ("-", &Int(a)) => Ok(Int(-a)),
+            ("-", &Flt(a)) => Ok(Flt(-a)),
+            // `!` negation unary operator
+            ("!", &Bool(a)) => Ok(Bool(!a)),
+            // TODO: `&`, `*`
+            _ => Err(RunTimeError::OperationNotAllowed(rhs.clone(), op.lexeme)),
         }
     }
     /// evaluate binary operation expression
@@ -282,23 +298,95 @@ impl LExpr {
     ) -> Result<LitValue, RunTimeError> {
         match (lhs, op.lexeme, rhs) {
             // binary operations of `int`
-            (LitValue::Int(a), "+", LitValue::Int(b)) => Ok(LitValue::Int(a + b)),
-            (LitValue::Int(a), "-", LitValue::Int(b)) => Ok(LitValue::Int(a - b)),
-            (LitValue::Int(a), "*", LitValue::Int(b)) => Ok(LitValue::Int(a * b)),
-            (LitValue::Int(a), "/", LitValue::Int(b)) => {
+            (Int(a), "+", Int(b)) => Ok(Int(a + b)),
+            (Int(a), "-", Int(b)) => Ok(Int(a - b)),
+            (Int(a), "*", Int(b)) => Ok(Int(a * b)),
+            (Int(a), "/", Int(b)) => {
                 if *b == 0 {
-                    return Err(RunTimeError::DivisionByZero);
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
                 }
                 Ok(LitValue::Int(a / b))
             }
-            (LitValue::Int(a), "%", LitValue::Int(b)) => Ok(LitValue::Int(a % b)),
-            (LitValue::Int(a), ">", LitValue::Int(b)) => Ok(LitValue::Bool(a > b)),
-            (LitValue::Int(a), "<", LitValue::Int(b)) => Ok(LitValue::Bool(a < b)),
-            (LitValue::Int(a), "==", LitValue::Int(b)) => Ok(LitValue::Bool(a == b)),
-            (LitValue::Int(a), "!=", LitValue::Int(b)) => Ok(LitValue::Bool(a != b)),
-            (LitValue::Int(a), "<=", LitValue::Int(b)) => Ok(LitValue::Bool(a <= b)),
-            (LitValue::Int(a), ">=", LitValue::Int(b)) => Ok(LitValue::Bool(a >= b)),
-
+            (Int(a), "%", Int(b)) => Ok(Int(a % b)),
+            (Int(a), ">", Int(b)) => Ok(Bool(a > b)),
+            (Int(a), "<", Int(b)) => Ok(Bool(a < b)),
+            (Int(a), "==", Int(b)) => Ok(Bool(a == b)),
+            (Int(a), "!=", Int(b)) => Ok(Bool(a != b)),
+            (Int(a), "<=", Int(b)) => Ok(Bool(a <= b)),
+            (Int(a), ">=", Int(b)) => Ok(Bool(a >= b)),
+            // binary operations for unt
+            (Unt(a), "+", Unt(b)) => Ok(Unt(a + b)),
+            (Unt(a), "-", Unt(b)) => Ok(Unt(a - b)),
+            (Unt(a), "*", Unt(b)) => Ok(Unt(a * b)),
+            (Unt(a), "/", Unt(b)) => {
+                if *b == 0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::Unt(a / b))
+            }
+            (Unt(a), "%", Unt(b)) => Ok(Unt(a % b)),
+            (Unt(a), ">", Unt(b)) => Ok(Bool(a > b)),
+            (Unt(a), "<", Unt(b)) => Ok(Bool(a < b)),
+            (Unt(a), "==", Unt(b)) => Ok(Bool(a == b)),
+            (Unt(a), "!=", Unt(b)) => Ok(Bool(a != b)),
+            (Unt(a), "<=", Unt(b)) => Ok(Bool(a <= b)),
+            (Unt(a), ">=", Unt(b)) => Ok(Bool(a >= b)),
+            // binary operations for flt
+            (Flt(a), "+", Flt(b)) => Ok(Flt(a + b)),
+            (Flt(a), "-", Flt(b)) => Ok(Flt(a - b)),
+            (Flt(a), "*", Flt(b)) => Ok(Flt(a * b)),
+            (Flt(a), "/", Flt(b)) => {
+                if *b == 0.0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::Flt(a / b))
+            }
+            (Flt(a), "%", Flt(b)) => Ok(Flt(a % b)),
+            (Flt(a), ">", Flt(b)) => Ok(Bool(a > b)),
+            (Flt(a), "<", Flt(b)) => Ok(Bool(a < b)),
+            (Flt(a), "==", Flt(b)) => Ok(Bool(a == b)),
+            (Flt(a), "!=", Flt(b)) => Ok(Bool(a != b)),
+            (Flt(a), "<=", Flt(b)) => Ok(Bool(a <= b)),
+            (Flt(a), ">=", Flt(b)) => Ok(Bool(a >= b)),
+            // binary operations for bool
+            (Bool(a), "+", Bool(b)) => Ok(Bool(*a == true && *b == true)),
+            (Bool(a), "-", Bool(b)) => Ok(Bool(*a == false && *b == false)),
+            (Bool(a), "*", Bool(b)) => Ok(Bool(*a == true || *b == true)),
+            (Bool(a), "/", Bool(b)) => Ok(Bool(*a == false || *b == false)),
+            (Bool(a), ">", Bool(b)) => Ok(Bool(a > b)),
+            (Bool(a), "<", Bool(b)) => Ok(Bool(a < b)),
+            (Bool(a), "==", Bool(b)) => Ok(Bool(a == b)),
+            (Bool(a), "!=", Bool(b)) => Ok(Bool(a != b)),
+            (Bool(a), "<=", Bool(b)) => Ok(Bool(a <= b)),
+            (Bool(a), ">=", Bool(b)) => Ok(Bool(a >= b)),
+            // binary operations for str
+            (Str(a), "+", Str(b)) => Ok(Str(format!("{}{}", a, b))),
+            (Str(a), ">", Str(b)) => Ok(Bool(a > b)),
+            (Str(a), "<", Str(b)) => Ok(Bool(a < b)),
+            (Str(a), "==", Str(b)) => Ok(Bool(a == b)),
+            (Str(a), "!=", Str(b)) => Ok(Bool(a != b)),
+            (Str(a), "<=", Str(b)) => Ok(Bool(a <= b)),
+            (Str(a), ">=", Str(b)) => Ok(Bool(a >= b)),
+            // binary operations for str
+            (Nil, ">", _) => Ok(Bool(false)),
+            (Nil, "<", _) => Ok(Bool(false)),
+            (Nil, "==", Nil) => Ok(Bool(true)),
+            (Nil, "==", _) => Ok(Bool(false)),
+            (Nil, ">=", Nil) => Ok(Bool(true)),
+            (Nil, ">=", _) => Ok(Bool(false)),
+            (Nil, "!=", Nil) => Ok(Bool(true)),
+            (Nil, "!=", _) => Ok(Bool(true)),
+            (Nil, "<=", Nil) => Ok(Bool(true)),
+            (Nil, "<=", _) => Ok(Bool(false)),
             _ => Err(RunTimeError::UnimplementedOperation(op.lexeme)),
         }
     }

@@ -8,7 +8,7 @@ use super::interpreter::RunTimeError;
 impl LitValue {
     pub fn type_check(&self, texpr: TExpr) -> Result<LitValue, RunTimeError> {
         if let TExpr::Literal(name) = texpr {
-            match self {
+            let check = match self {
                 Int(_) => name == "int",
                 Unt(_) => name == "unt",
                 Flt(_) => name == "flt",
@@ -18,7 +18,11 @@ impl LitValue {
                 Void => name == "void",
                 Nil => name == "nil",
             };
+            if !check {
+                return Err(RunTimeError::TypeError(self.clone(), texpr));
+            }
+            return Ok(self.clone());
         }
-        unimplemented!()
+        Ok(self.clone())
     }
 }

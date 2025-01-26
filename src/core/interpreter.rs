@@ -4,12 +4,15 @@ use crate::ast::texp::TExpr;
 use crate::ast::LitValue;
 use crate::core::memory::{Function, Memory, Metadata};
 use std::cell::RefCell;
+use std::fmt::Display;
 use std::rc::Rc;
 
 #[derive(Debug)]
 pub enum RunTimeError {
-    /// error occurs when trying to divide number by zero
-    DivisionByZero,
+    /// error occurs when un-allowed operations occurs
+    ///
+    /// (value, operator)
+    OperationNotAllowed(LitValue, &'static str),
     /// functions argument size doesn't match parameters
     FuncArgSize(&'static str),
     /// operation hasn't yet been implemented
@@ -18,8 +21,26 @@ pub enum RunTimeError {
     VariableNotFound(&'static str),
     /// can't assign to the immutable value
     ImmutableAssignement(&'static str),
-    /// type error between two literal values
-    TypesDontMatch(&'static str),
+    TypeError(LitValue, TExpr),
+}
+
+impl Display for RunTimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FuncArgSize(a) => write!(f, "invalid argument size for '{}' function", a),
+            Self::ImmutableAssignement(a) => {
+                write!(f, "can't assign to the immutable variable '{}'", a)
+            }
+            Self::OperationNotAllowed(v, o) => {
+                write!(f, "operation '{}' isn't allowed for '{:?}'", o, v)
+            }
+            Self::VariableNotFound(a) => write!(f, "variable '{}' has yet been declared", a),
+            Self::UnimplementedOperation(o) => {
+                write!(f, "operation '{}' hasn't been implemented", o)
+            }
+            Self::TypeError(value, texpr) => write!(f, "type error, expected {:?}, but received {:?}", value, texpr)
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -108,14 +129,11 @@ impl Interpreter {
                 Ok(())
             }
             Stmt::Break => {
-                self.memory
-                    .borrow_mut()
-                    .specials
-                    .insert("break", LExpr::Null);
+                self.memory.borrow_mut().specials.insert("break", None);
                 Ok(())
             }
             Stmt::Return(e) => {
-                self.memory.borrow_mut().specials.insert("return", e);
+                self.memory.borrow_mut().specials.insert("return", Some(e));
                 Ok(())
             }
         }
@@ -126,13 +144,13 @@ impl Interpreter {
         &mut self,
         name: &'static str,
         value: LExpr,
-        _: TExpr,
+        texpr: TExpr,
         is_const: bool,
     ) -> Result<(), RunTimeError> {
-        let value = value.eval(Rc::clone(&self.memory));
-
+        let value = value.eval(Rc::clone(&self.memory))?;
+        value.type_check(texpr.clone())?;
         let mut mem = self.memory.borrow_mut();
-        let var_id = mem.allocate_heap(value?);
+        let var_id = mem.allocate_heap(value, texpr);
         mem.set_stack_var(name, LitValue::HeapRef(var_id), Metadata::Var { is_const });
         Ok(())
     }
@@ -214,8 +232,9 @@ impl Interpreter {
         if let LExpr::Binary { lhs, rhs, op, .. } = pred {
             if let (LExpr::Var { .. }, LExpr::Value { lit, .. }) = (&**lhs, &**rhs) {
                 match lit {
-                    LitValue::Int(_) => op.lexeme == "<",
-                    // add other operations
+                    LitValue::Int(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
+                    LitValue::Unt(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
+                    LitValue::Flt(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
                     _ => false,
                 }
             } else {
@@ -303,7 +322,7 @@ impl Interpreter {
                     }
 
                     // update final values
-                    let var_id = mem.allocate_heap(LitValue::Int(sum));
+                    let var_id = mem.allocate_heap(LitValue::Int(sum), TExpr::Literal("int"));
                     mem.set_stack_var(sum_var.lexeme, LitValue::HeapRef(var_id), Metadata::Null);
                     mem.set_stack_var(counter_name, LitValue::Int(iterations), Metadata::Null);
                 }

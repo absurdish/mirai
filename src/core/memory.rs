@@ -22,6 +22,7 @@ pub struct Function {
 #[derive(Clone, Debug)]
 pub struct HeapValue {
     pub value: LitValue,
+    pub texpr: TExpr,
     // owner for borrowing semantics
     owner: Option<Rc<RefCell<Memory>>>,
     borrowed_by: Vec<Rc<RefCell<Memory>>>,
@@ -39,7 +40,7 @@ pub struct Memory {
     pub stack: Vec<Rc<RefCell<HashMap<&'static str, (LitValue, Metadata)>>>>,
     // heap memory
     pub heap: HashMap<usize, Rc<RefCell<HeapValue>>>,
-    pub specials: HashMap<&'static str, LExpr>,
+    pub specials: HashMap<&'static str, Option<LExpr>>,
     // next heap id
     next: usize,
 }
@@ -118,13 +119,14 @@ impl Memory {
 
     /// allocates a value on the heap and returns a reference ID
     #[inline]
-    pub fn allocate_heap(&mut self, value: LitValue) -> usize {
+    pub fn allocate_heap(&mut self, value: LitValue, texpr: TExpr) -> usize {
         let id = self.next;
         self.next += 1;
         self.heap.insert(
             id,
             Rc::new(RefCell::new(HeapValue {
                 value,
+                texpr,
                 owner: None,
                 borrowed_by: Vec::with_capacity(4),
             })),
@@ -175,7 +177,7 @@ impl Memory {
 
     /// adds a function to the memory
     pub fn add_function(&mut self, name: &'static str, function: Function) {
-        let id = self.allocate_heap(LitValue::Fun(Box::new(function)));
+        let id = self.allocate_heap(LitValue::Fun(Box::new(function.clone())), function.texpr);
         self.set_stack_var(name, LitValue::HeapRef(id), Metadata::Null);
     }
 }

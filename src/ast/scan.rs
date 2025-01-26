@@ -132,13 +132,9 @@ impl Ast {
 
                 // TODO: implement auto-resizing
                 let value = if is_float {
-                    LitValue::Flt(
-                        lexeme.parse::<f32>().expect("failed to unwrap a number"),
-                    )
+                    LitValue::Flt(lexeme.parse::<f32>().expect("failed to unwrap a number"))
                 } else {
-                    LitValue::Int(
-                        lexeme.parse::<i32>().expect("failed to unwrap a number"),
-                    )
+                    LitValue::Int(lexeme.parse::<i32>().expect("failed to unwrap a number"))
                 };
                 self.push(Literal(value.clone()), Some(value));
             }
@@ -268,6 +264,8 @@ impl Ast {
         self.current_token >= self.input.len() || self.peek() == '\0'
     }
 }
+
+// TODO
 
 #[test]
 fn scanner_tests() {

@@ -57,9 +57,6 @@ pub enum LitValue {
 }
 
 impl LitValue {
-    pub fn same_type(&self, v2: &LitValue) -> bool {
-        std::mem::discriminant(self) == std::mem::discriminant(v2)
-    }
     pub fn is_truthy(&self) -> bool {
         match self {
             LitValue::Nil => false,
@@ -75,28 +72,28 @@ impl LitValue {
     }
 }
 
-/// signed integer type variations
-#[derive(Debug, Clone, PartialEq)]
-pub enum IntSize {
-    I32(i32),
-    I64(i64),
-    I128(i128),
-}
+// /// signed integer type variations
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum IntSize {
+//     I32(i32),
+//     I64(i64),
+//     I128(i128),
+// }
 
-/// unsigned integer type variations
-#[derive(Debug, Clone, PartialEq)]
-pub enum UntSize {
-    U32(u32),
-    U64(u64),
-    U128(u128),
-}
+// /// unsigned integer type variations
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum UntSize {
+//     U32(u32),
+//     U64(u64),
+//     U128(u128),
+// }
 
-/// floating point number type variations
-#[derive(Debug, Clone, PartialEq)]
-pub enum FltSize {
-    F32(f32),
-    F64(f64),
-}
+// /// floating point number type variations
+// #[derive(Debug, Clone, PartialEq)]
+// pub enum FltSize {
+//     F32(f32),
+//     F64(f64),
+// }
 
 /// list of keywords in the language
 pub const KEYWORDS: &[&str] = &[
@@ -203,7 +200,7 @@ impl Ast {
     #[inline(always)]
     pub fn match_token(&mut self, token: TokenType) -> bool {
         if self.check(token) {
-            self.advances();
+            let _ = self.advances();
             true
         } else {
             false

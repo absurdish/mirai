@@ -3,92 +3,116 @@ use super::{
     TokenType::{self, *},
 };
 
-/// literal expressions that than can be evaluated into the literal values
+/// literal expressions, evaluated into the literal valuesI
 #[derive(Debug, PartialEq, Clone)]
 pub enum LExpr {
-    /// assign operator assigns literal values to the already defined variables
+    /// assignement expression assigns values to the variables
+    /// ```
+    /// int x = 0
+    /// x = 1
+    /// x += 1
+    /// x -= 1
+    /// x *= 2
+    /// x /= 1
+    /// x := 3 // declares a new variable if variable can't be found
+    /// ```
     Assign {
         id: usize,
         name: Token,
         lit: Box<LExpr>,
         kind: AssignKind,
     },
-    /// variable holding expression
-    Var {
-        id: usize,
-        name: Token,
-    },
-    /// function caller
+    /// identifier
+    /// ```
+    /// x
+    /// ```
+    Var { id: usize, name: Token },
+    /// function call expression
+    /// ```
+    /// myfunc(x, 3)
+    /// ```
     Call {
         id: usize,
         name: Box<LExpr>,
         args: Vec<LExpr>,
     },
-    /// unary operation: {op}{lexpr}
+    /// unary operations, with operator on the left hand side
+    /// ```
+    /// -4
+    /// &x
+    /// *x
+    /// ```
     Unary {
         id: usize,
         op: Token,
         lhs: Box<LExpr>,
     },
-    /// binary operation: {lexpr}{op}{lexpr}
+    /// binary operation, with literal expressions on the both sides of the opreator
+    /// ```
+    /// 2 + 2
+    /// 5 / 2
+    /// 7 * 7
+    /// ```
     Binary {
         id: usize,
         op: Token,
         lhs: Box<LExpr>,
         rhs: Box<LExpr>,
     },
-    /// grouping: ({lexpr})
-    Grouping {
-        id: usize,
-        expr: Box<LExpr>,
-    },
-    /// literal value
-    Value {
-        id: usize,
-        lit: LitValue,
-    },
-    Null,
+    /// mathematical grouping
+    /// ```
+    /// 2 * ( 2 + 2)
+    /// (2 + 2)*(4 + 4)
+    /// ```
+    Grouping { id: usize, expr: Box<LExpr> },
+    /// expression for literal values
+    Value { id: usize, lit: LitValue },
 }
 
-/// possible kinds of assignements
+/// kinds of assignement
 #[derive(Debug, PartialEq, Clone)]
 pub enum AssignKind {
-    Eq,    // id = value
-    Plus,  // id += value
-    Minus, // id -= value
-    Mult,  // id *= value
-    Div,   // id /= value
-    /// dynamic assignement declares a new variable if target wasn't found and dynamically assigns a type to it
-    Dynamic, // id := value
+    /// `id = lit`
+    Eq,
+    /// `id += lit`
+    Plus,
+    /// `id -= lit`
+    Minus,
+    /// `id *= lit`
+    Mult,
+    /// `id /= lit`
+    Div,
+    /// `id := lit`
+    Dynamic,
 }
 
 impl Ast {
-    /// entry point of the literal expression parser, parses literal binary operation expression
-    #[inline]
+    /// parse literal expressions
     pub fn lexpr(&mut self) -> Result<LExpr, AstError> {
         let mut expr = self.unary()?;
-        while !self.is_at_end() && self.match_binary_op() {
+        while self.match_binary_op() {
+            let op = self.prev(1)?;
+            let rhs = self.unary()?;
             expr = LExpr::Binary {
                 id: self.next_id(),
-                op: self.prev(1)?,
+                op,
                 lhs: Box::new(expr),
-                rhs: Box::new(self.unary()?),
-            }
+                rhs: Box::new(rhs),
+            };
         }
-
         Ok(expr)
     }
 
-    #[inline]
+    /// list of binary operations
     fn match_binary_op(&mut self) -> bool {
         self.match_any(&[
             Char('+'),
             Char('-'),
             Char('*'),
             Char('/'),
+            Char('%'),
             Char('>'),
             Char('<'),
-            Char('%'),
             Chars(('>', '=')),
             Chars(('<', '=')),
             Chars(('=', '=')),
@@ -96,107 +120,108 @@ impl Ast {
         ])
     }
 
-    #[inline]
+    /// unary operation parser
     fn unary(&mut self) -> Result<LExpr, AstError> {
         if self.match_unary_op() {
+            let op = self.prev(1)?;
+            let lhs = self.call()?;
             return Ok(LExpr::Unary {
                 id: self.next_id(),
-                op: self.prev(1)?,
-                lhs: Box::new(self.call()?),
+                op,
+                lhs: Box::new(lhs),
             });
         }
         self.call()
     }
 
-    #[inline]
+    /// list of unary operations
     fn match_unary_op(&mut self) -> bool {
         self.match_any(&[Char('&'), Char('*'), Char('-'), Char('!')])
     }
 
-    #[inline]
+    /// function caller parser
     fn call(&mut self) -> Result<LExpr, AstError> {
         let mut expr = self.primary()?;
-        if self.check(TokenType::Char('(')) {
-            self.advances()?;
-            let mut args = Vec::with_capacity(2);
-            while !self.check(TokenType::Char(')')) {
+        while self.match_token(Char('(')) {
+            let mut args = Vec::new();
+            while !self.check(Char(')')) {
                 args.push(self.lexpr()?);
-                if !self.match_token(TokenType::Char(',')) {
+                if !self.match_token(Char(',')) {
                     break;
                 }
             }
-            self.consumes(TokenType::Char(')'))?;
+            self.consumes(Char(')'))?;
             expr = LExpr::Call {
                 id: self.next_id(),
                 name: Box::new(expr),
                 args,
-            }
+            };
         }
         Ok(expr)
     }
 
-    #[inline]
+    /// primary (primitive) expressions
     fn primary(&mut self) -> Result<LExpr, AstError> {
         match self.peeks()?.token {
-            TokenType::Identifier => {
-                // variable token
+            Identifier => {
                 let name = self.advances()?;
-
-                // handle assignements
-                match self.peeks()?.token {
-                    TokenType::Char(c) if c == '=' => {
+                let kind = match self.peeks()?.token {
+                    Char('=') => {
                         self.advances()?;
-                        return Ok(LExpr::Assign {
+                        AssignKind::Eq
+                    }
+                    Chars(('+', '=')) => {
+                        self.advances()?;
+                        AssignKind::Plus
+                    }
+                    Chars(('-', '=')) => {
+                        self.advances()?;
+                        AssignKind::Minus
+                    }
+                    Chars(('*', '=')) => {
+                        self.advances()?;
+                        AssignKind::Mult
+                    }
+                    Chars(('/', '=')) => {
+                        self.advances()?;
+                        AssignKind::Div
+                    }
+                    Chars((':', '=')) => {
+                        self.advances()?;
+                        AssignKind::Dynamic
+                    }
+                    _ => {
+                        return Ok(LExpr::Var {
                             id: self.next_id(),
                             name,
-                            lit: Box::new(self.lexpr()?),
-                            kind: AssignKind::Eq,
                         });
                     }
-                    TokenType::Chars((l, r)) if r == '=' => {
-                        let mut kind = AssignKind::Eq;
-                        match l {
-                            '+' => kind = AssignKind::Plus,
-                            '-' => kind = AssignKind::Minus,
-                            '/' => kind = AssignKind::Div,
-                            '*' => kind = AssignKind::Mult,
-                            ':' => kind = AssignKind::Dynamic,
-                            _ => {}
-                        }
-                        self.advances()?;
-                        return Ok(LExpr::Assign {
-                            id: self.next_id(),
-                            name,
-                            lit: Box::new(self.lexpr()?),
-                            kind,
-                        });
-                    }
-                    _ => {}
-                }
-
-                Ok(LExpr::Var {
+                };
+                let rhs = self.lexpr()?;
+                Ok(LExpr::Assign {
                     id: self.next_id(),
                     name,
+                    lit: Box::new(rhs),
+                    kind,
                 })
             }
-            TokenType::Char('(') => {
+            Char('(') => {
                 self.advances()?;
                 let expr = self.lexpr()?;
-                self.consumes(TokenType::Char(')'))?;
+                self.consumes(Char(')'))?;
                 Ok(LExpr::Grouping {
                     id: self.next_id(),
                     expr: Box::new(expr),
                 })
             }
-            TokenType::Literal(_) => {
+            Literal(_) => {
                 let token = self.advances()?;
+                let TokenType::Literal(lit) = token.token else {
+                    unreachable!("Encountered non-literal token after match");
+                };
                 Ok(LExpr::Value {
                     id: self.next_id(),
-                    lit: if let TokenType::Literal(l) = token.token {
-                        l
-                    } else {
-                        LitValue::Nil
-                    },
+                    lit,
                 })
             }
             _ => Err(AstError::UnexpectedToken(self.peeks()?.lexeme)),

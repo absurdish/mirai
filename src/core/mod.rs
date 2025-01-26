@@ -24,7 +24,7 @@ pub fn run(input: &'static str) {
     // interpreters the code
     let mut interpreter = Interpreter::new();
     if let Err(e) = interpreter.start(stmts) {
-        eprintln!("error: {:?}", e)
+        eprintln!("error: {}", e)
     }
     // memory testing code
     //
