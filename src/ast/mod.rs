@@ -2,6 +2,8 @@ pub mod lexp;
 pub mod scan;
 pub mod stmt;
 pub mod texp;
+use std::fmt::Display;
+
 use smallvec::SmallVec;
 use stmt::Stmt;
 
@@ -38,16 +40,35 @@ pub enum TokenType {
 /// allowed literal values
 #[derive(Debug, Clone, PartialEq)]
 pub enum LitValue {
+    Vector {
+        kind: Vec<LitValue>,
+        owner: &'static str,
+    },
     /// signed integer type
-    Int(i32),
+    Int {
+        kind: i64,
+        owner: &'static str,
+    },
     /// unsigned integer type
-    Unt(u32),
+    Unt {
+        kind: u64,
+        owner: &'static str,
+    },
     /// floating point number type
-    Flt(f32),
+    Flt {
+        kind: f64,
+        owner: &'static str,
+    },
     /// string type
-    Str(String),
+    Str {
+        kind: String,
+        owner: &'static str,
+    },
     /// boolean type
-    Bool(bool),
+    Bool {
+        kind: bool,
+        owner: &'static str,
+    },
     /// void type, can only be returned by functions
     Void,
     /// empty/null value
@@ -55,45 +76,70 @@ pub enum LitValue {
     HeapRef(usize),
     Fun(Box<Function>),
 }
+use LitValue::*;
 
-impl LitValue {
-    pub fn is_truthy(&self) -> bool {
+impl Display for LitValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LitValue::Nil => false,
-            LitValue::Void => false,
-            LitValue::Flt(a) => *a != 0.0,
-            LitValue::Fun(_) => false,
-            LitValue::Str(a) => a.len() != 0,
-            LitValue::Unt(a) => *a != 0,
-            LitValue::Bool(a) => *a,
-            LitValue::HeapRef(_) => false,
-            LitValue::Int(a) => *a != 0,
+            Vector { kind, .. } => {
+                write!(f, "[")?;
+                for (i, value) in kind.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", value)?;
+                }
+                write!(f, "]")
+            }
+            Int { kind, .. } => write!(f, "{}", kind),
+            Unt { kind, .. } => write!(f, "{}", kind),
+            Flt { kind, .. } => write!(f, "{}", kind),
+            Bool { kind, .. } => write!(f, "{}", kind),
+            Str { kind, .. } => write!(f, "{}", kind),
+            Void => write!(f, "void"),
+            Nil => write!(f, "nil"),
+            HeapRef(e) => write!(f, "ref{}*", e),
+            Fun(_) => write!(f, "function"),
         }
     }
 }
 
-// /// signed integer type variations
-// #[derive(Debug, Clone, PartialEq)]
-// pub enum IntSize {
-//     I32(i32),
-//     I64(i64),
-//     I128(i128),
-// }
-
-// /// unsigned integer type variations
-// #[derive(Debug, Clone, PartialEq)]
-// pub enum UntSize {
-//     U32(u32),
-//     U64(u64),
-//     U128(u128),
-// }
-
-// /// floating point number type variations
-// #[derive(Debug, Clone, PartialEq)]
-// pub enum FltSize {
-//     F32(f32),
-//     F64(f64),
-// }
+impl LitValue {
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Nil | Void | HeapRef(_) | Fun(_) => false,
+            Flt { kind, .. } => *kind != 0.0,
+            Str { kind, .. } => kind.len() != 0,
+            Unt { kind, .. } => *kind != 0,
+            Bool { kind, .. } => *kind,
+            Int { kind, .. } => *kind != 0,
+            Vector { kind, .. } => kind.len() != 0,
+        }
+    }
+    pub fn owner(&self) -> &'static str {
+        match self {
+            Flt { owner, .. }
+            | Str { owner, .. }
+            | Unt { owner, .. }
+            | Int { owner, .. }
+            | Bool { owner, .. } => owner,
+            _ => "",
+        }
+    }
+    pub fn owned(&self, owner: &'static str) -> LitValue {
+        match self {
+            LitValue::Flt { kind, .. } => LitValue::Flt { kind: *kind, owner },
+            LitValue::Str { kind, .. } => LitValue::Str {
+                kind: kind.clone(),
+                owner,
+            },
+            LitValue::Unt { kind, .. } => LitValue::Unt { kind: *kind, owner },
+            LitValue::Int { kind, .. } => LitValue::Int { kind: *kind, owner },
+            LitValue::Bool { kind, .. } => LitValue::Bool { kind: *kind, owner },
+            other => other.clone(),
+        }
+    }
+}
 
 /// list of keywords in the language
 pub const KEYWORDS: &[&str] = &[
@@ -176,7 +222,7 @@ impl Ast {
         if self.check(token) {
             return self.advances();
         }
-        Err(AstError::MissingToken("todo: {token}"))
+        Err(AstError::MissingToken(self.peeks()?.lexeme))
     }
 
     #[inline(always)]

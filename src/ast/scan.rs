@@ -102,8 +102,14 @@ impl Ast {
                 self.advance();
                 let lexeme = &self.input[self.start + 1..self.current_token - 1];
                 self.push(
-                    Literal(LitValue::Str(lexeme.to_string())),
-                    Some(LitValue::Str(lexeme.to_string())),
+                    Literal(LitValue::Str {
+                        kind: lexeme.to_string(),
+                        owner: "",
+                    }),
+                    Some(LitValue::Str {
+                        kind: lexeme.to_string(),
+                        owner: "",
+                    }),
                 );
             }
             // ignored tokens, like '\r'
@@ -132,9 +138,15 @@ impl Ast {
 
                 // TODO: implement auto-resizing
                 let value = if is_float {
-                    LitValue::Flt(lexeme.parse::<f32>().expect("failed to unwrap a number"))
+                    LitValue::Flt {
+                        kind: lexeme.parse::<f64>().expect("failed to unwrap a number"),
+                        owner: "",
+                    }
                 } else {
-                    LitValue::Int(lexeme.parse::<i32>().expect("failed to unwrap a number"))
+                    LitValue::Int {
+                        kind: lexeme.parse::<i64>().expect("failed to unwrap a number"),
+                        owner: "",
+                    }
                 };
                 self.push(Literal(value.clone()), Some(value));
             }

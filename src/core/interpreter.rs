@@ -1,7 +1,7 @@
 use crate::ast::lexp::LExpr;
 use crate::ast::stmt::Stmt;
 use crate::ast::texp::TExpr;
-use crate::ast::LitValue;
+use crate::ast::LitValue::{self, *};
 use crate::core::memory::{Function, Memory, Metadata};
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -32,13 +32,17 @@ impl Display for RunTimeError {
                 write!(f, "can't assign to the immutable variable '{}'", a)
             }
             Self::OperationNotAllowed(v, o) => {
-                write!(f, "operation '{}' isn't allowed for '{:?}'", o, v)
+                write!(f, "operation '{}' isn't allowed for '{}'", o, v)
             }
             Self::VariableNotFound(a) => write!(f, "variable '{}' has yet been declared", a),
             Self::UnimplementedOperation(o) => {
                 write!(f, "operation '{}' hasn't been implemented", o)
             }
-            Self::TypeError(value, texpr) => write!(f, "type error, expected {:?}, but received {:?}", value, texpr)
+            Self::TypeError(value, texpr) => write!(
+                f,
+                "type error, expected {:?}, but received {}",
+                texpr, value
+            ),
         }
     }
 }
@@ -47,7 +51,7 @@ impl Display for RunTimeError {
 pub struct LoopInfo {
     is_numeric: bool,
     counter: Option<&'static str>,
-    iterations: Option<i32>,
+    iterations: Option<i64>,
     has_function_calls: bool,
 }
 
@@ -81,7 +85,7 @@ impl Interpreter {
     pub fn statement(&mut self, stmt: Stmt) -> Result<(), RunTimeError> {
         match stmt {
             Stmt::Print(e) => {
-                println!("{:?}", e.eval(Rc::clone(&self.memory)));
+                println!("{}", e.eval(Rc::clone(&self.memory))?);
                 Ok(())
             }
             Stmt::Expr(e) => {
@@ -93,10 +97,7 @@ impl Interpreter {
                 lexpr,
                 texpr,
                 is_const,
-            } => {
-                self.handle_var_declaration(name.lexeme, lexpr, texpr, is_const)?;
-                Ok(())
-            }
+            } => self.handle_var_declaration(name.lexeme, lexpr, texpr, is_const),
             Stmt::Fn {
                 name,
                 params,
@@ -112,22 +113,13 @@ impl Interpreter {
                 self.memory.borrow_mut().add_function(name.lexeme, function);
                 Ok(())
             }
-            Stmt::Block(stmts) => {
-                self.handle_block(stmts)?;
-                Ok(())
-            }
+            Stmt::Block(stmts) => self.handle_block(stmts),
             Stmt::If {
                 pred,
                 body,
                 else_body,
-            } => {
-                self.handle_if(pred, *body, else_body)?;
-                Ok(())
-            }
-            Stmt::While { pred, body } => {
-                self.handle_while(pred, *body)?;
-                Ok(())
-            }
+            } => self.handle_if(pred, *body, else_body),
+            Stmt::While { pred, body } => self.handle_while(pred, *body),
             Stmt::Break => {
                 self.memory.borrow_mut().specials.insert("break", None);
                 Ok(())
@@ -147,8 +139,22 @@ impl Interpreter {
         texpr: TExpr,
         is_const: bool,
     ) -> Result<(), RunTimeError> {
-        let value = value.eval(Rc::clone(&self.memory))?;
+        let mut value = value.eval(Rc::clone(&self.memory))?;
         value.type_check(texpr.clone())?;
+        // check if value already has an owner
+        if value.owner().is_empty() {
+            // claim the ownership if value has no owner
+            value = value.owned(name);
+        } else {
+            // if value is already owned
+            // a. move the ownership here
+            // this means to destroy previous owner
+            // b. copy the value
+            // new memory will be allocated
+            // c. borrow the value
+            // reference value to the owner will be allocated
+        }
+
         let mut mem = self.memory.borrow_mut();
         let var_id = mem.allocate_heap(value, texpr);
         mem.set_stack_var(name, LitValue::HeapRef(var_id), Metadata::Var { is_const });
@@ -232,9 +238,9 @@ impl Interpreter {
         if let LExpr::Binary { lhs, rhs, op, .. } = pred {
             if let (LExpr::Var { .. }, LExpr::Value { lit, .. }) = (&**lhs, &**rhs) {
                 match lit {
-                    LitValue::Int(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
-                    LitValue::Unt(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
-                    LitValue::Flt(_) => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
+                    Int { .. } => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
+                    Unt { .. } => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
+                    Flt { .. } => matches!(op.lexeme, "<" | ">" | "<=" | ">=" | "==" | "!="),
                     _ => false,
                 }
             } else {
@@ -253,12 +259,17 @@ impl Interpreter {
                     if let (
                         LExpr::Var { name: counter, .. },
                         LExpr::Value {
-                            lit: LitValue::Int(1),
-                            ..
+                            lit: Int { .. }, ..
                         },
                     ) = (&**lhs, &**rhs)
                     {
-                        if op.lexeme == "+" && name.lexeme == counter.lexeme {
+                        if (op.lexeme == "+"
+                            || op.lexeme == "-"
+                            || op.lexeme == "*"
+                            || op.lexeme == "/"
+                            || op.lexeme == "%")
+                            && name.lexeme == counter.lexeme
+                        {
                             return Some(name.lexeme);
                         }
                     }
@@ -269,19 +280,17 @@ impl Interpreter {
     }
 
     #[inline]
-    fn estimate_loop_iterations(&self, pred: &LExpr) -> Option<i32> {
+    fn estimate_loop_iterations(&self, pred: &LExpr) -> Option<i64> {
         if let LExpr::Binary { rhs, .. } = pred {
             if let LExpr::Value { lit, .. } = &**rhs {
-                match lit {
-                    LitValue::Int(n) => Some(*n),
+                return match lit {
+                    Int { kind, .. } => Some(*kind),
                     _ => None,
-                }
-            } else {
-                None
+                };
             }
-        } else {
-            None
+            return None;
         }
+        None
     }
 
     #[inline]
@@ -308,8 +317,8 @@ impl Interpreter {
                 })) = stmts.first()
                 {
                     // fast path for sum calculation
-                    let mut sum = 0i32;
-                    let mut i = 0i32;
+                    let mut sum = 0i64;
+                    let mut i = 0i64;
 
                     // unrolled loop for better performance
                     while i < iterations {
@@ -322,9 +331,22 @@ impl Interpreter {
                     }
 
                     // update final values
-                    let var_id = mem.allocate_heap(LitValue::Int(sum), TExpr::Literal("int"));
+                    let var_id = mem.allocate_heap(
+                        Int {
+                            kind: sum,
+                            owner: "",
+                        },
+                        TExpr::Literal("int"),
+                    );
                     mem.set_stack_var(sum_var.lexeme, LitValue::HeapRef(var_id), Metadata::Null);
-                    mem.set_stack_var(counter_name, LitValue::Int(iterations), Metadata::Null);
+                    mem.set_stack_var(
+                        counter_name,
+                        Int {
+                            kind: iterations,
+                            owner: "",
+                        },
+                        Metadata::Null,
+                    );
                 }
             }
         } else {

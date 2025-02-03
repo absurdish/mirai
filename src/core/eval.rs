@@ -1,9 +1,9 @@
 use crate::ast::{
-    lexp::LExpr,
+    lexp::{AssignKind, LExpr},
     stmt::Stmt,
     texp::TExpr,
     LitValue::{self, *},
-    Token,
+    Token, TokenType,
 };
 use crate::core::{
     interpreter::Interpreter,
@@ -172,27 +172,56 @@ impl LExpr {
 
         if let Some(LExpr::Binary { op, lhs, rhs, .. }) = args.first() {
             // Fast path for common arithmetic operations
-            let lhs_val = (**lhs).eval(Rc::clone(mem));
-            let rhs_val = (**rhs).eval(Rc::clone(mem));
-
-            return match (op.lexeme, &lhs_val?, &rhs_val?) {
-                ("+", Int(a), Int(b)) => Ok(Some(Int(a + b))),
-                ("-", Int(a), Int(b)) => Ok(Some(Int(a - b))),
-                ("*", Int(a), Int(b)) => Ok(Some(Int(a * b))),
-                ("/", Int(a), Int(b)) => Ok(Some(Int(a / b))),
-                ("%", Int(a), Int(b)) => Ok(Some(Int(a % b))),
+            let lhs_val = (**lhs).eval(Rc::clone(mem))?;
+            let rhs_val = (**rhs).eval(Rc::clone(mem))?;
+            return match (op.lexeme, &lhs_val, &rhs_val) {
+                ("+", Int { kind: a, owner }, Int { kind: b, .. }) => {
+                    Ok(Some(Int { kind: a + b, owner }))
+                }
+                ("-", Int { kind: a, owner }, Int { kind: b, .. }) => {
+                    Ok(Some(Int { kind: a - b, owner }))
+                }
+                ("*", Int { kind: a, owner }, Int { kind: b, .. }) => {
+                    Ok(Some(Int { kind: a * b, owner }))
+                }
+                ("/", Int { kind: a, owner }, Int { kind: b, .. }) => {
+                    Ok(Some(Int { kind: a / b, owner }))
+                }
+                ("%", Int { kind: a, owner }, Int { kind: b, .. }) => {
+                    Ok(Some(Int { kind: a % b, owner }))
+                }
                 //
-                ("+", Unt(a), Unt(b)) => Ok(Some(Unt(a + b))),
-                ("-", Unt(a), Unt(b)) => Ok(Some(Unt(a - b))),
-                ("*", Unt(a), Unt(b)) => Ok(Some(Unt(a * b))),
-                ("/", Unt(a), Unt(b)) => Ok(Some(Unt(a / b))),
-                ("%", Unt(a), Unt(b)) => Ok(Some(Unt(a % b))),
+                ("+", Unt { kind: a, owner }, Unt { kind: b, .. }) => {
+                    Ok(Some(Unt { kind: a + b, owner }))
+                }
+                ("-", Unt { kind: a, owner }, Unt { kind: b, .. }) => {
+                    Ok(Some(Unt { kind: a - b, owner }))
+                }
+                ("*", Unt { kind: a, owner }, Unt { kind: b, .. }) => {
+                    Ok(Some(Unt { kind: a * b, owner }))
+                }
+                ("/", Unt { kind: a, owner }, Unt { kind: b, .. }) => {
+                    Ok(Some(Unt { kind: a / b, owner }))
+                }
+                ("%", Unt { kind: a, owner }, Unt { kind: b, .. }) => {
+                    Ok(Some(Unt { kind: a % b, owner }))
+                }
                 //
-                ("+", Flt(a), Flt(b)) => Ok(Some(Flt(a + b))),
-                ("-", Flt(a), Flt(b)) => Ok(Some(Flt(a - b))),
-                ("*", Flt(a), Flt(b)) => Ok(Some(Flt(a * b))),
-                ("/", Flt(a), Flt(b)) => Ok(Some(Flt(a / b))),
-                ("%", Flt(a), Flt(b)) => Ok(Some(Flt(a % b))),
+                ("+", Flt { kind: a, owner }, Flt { kind: b, .. }) => {
+                    Ok(Some(Flt { kind: a + b, owner }))
+                }
+                ("-", Flt { kind: a, owner }, Flt { kind: b, .. }) => {
+                    Ok(Some(Flt { kind: a - b, owner }))
+                }
+                ("*", Flt { kind: a, owner }, Flt { kind: b, .. }) => {
+                    Ok(Some(Flt { kind: a * b, owner }))
+                }
+                ("/", Flt { kind: a, owner }, Flt { kind: b, .. }) => {
+                    Ok(Some(Flt { kind: a / b, owner }))
+                }
+                ("%", Flt { kind: a, owner }, Flt { kind: b, .. }) => {
+                    Ok(Some(Flt { kind: a % b, owner }))
+                }
                 _ => Ok(None),
             };
         }
@@ -205,6 +234,16 @@ impl LExpr {
     pub fn eval(&self, mem: Rc<RefCell<Memory>>) -> Result<LitValue, RunTimeError> {
         match self {
             LExpr::Value { lit, .. } => Ok(lit.clone()),
+            LExpr::Vector { elems, .. } => Ok(Vector {
+                kind: elems
+                    .iter()
+                    .map(|f| {
+                        let e = f.eval(Rc::clone(&mem));
+                        e.expect("failed in vector")
+                    })
+                    .collect(),
+                owner: "",
+            }),
             LExpr::Grouping { expr, .. } => expr.eval(mem),
             LExpr::Unary { lhs, op, .. } => self.eval_unary(op, &lhs.eval(mem)?),
             LExpr::Binary { lhs, rhs, op, .. } => {
@@ -243,7 +282,9 @@ impl LExpr {
                 return Err(RunTimeError::VariableNotFound(name.lexeme));
             }
             // handle assigning operations
-            LExpr::Assign { name, lit, .. } => {
+            LExpr::Assign {
+                name, lit, kind, ..
+            } => {
                 // evaluate the value expression
                 let eval_value = lit.eval(Rc::clone(&mem))?;
                 // get the mutable reference to the memory
@@ -264,8 +305,54 @@ impl LExpr {
                         }
 
                         // assign a new heap value
-                        heap_value.value =
-                            eval_value.clone().type_check(heap_value.texpr.clone())?;
+
+                        match kind {
+                            AssignKind::Eq => {
+                                heap_value.value =
+                                    eval_value.clone().type_check(heap_value.texpr.clone())?;
+                            }
+                            AssignKind::Plus | AssignKind::Minus => {
+                                heap_value.value = match (&heap_value.value, &eval_value) {
+                                    (
+                                        LitValue::Int { kind: k1, owner },
+                                        LitValue::Int { kind: k2, .. },
+                                    ) => LitValue::Int {
+                                        kind: if matches!(kind, AssignKind::Plus) {
+                                            k1 + k2
+                                        } else {
+                                            k1 - k2
+                                        },
+                                        owner: *owner,
+                                    },
+                                    (
+                                        LitValue::Unt { kind: k1, owner },
+                                        LitValue::Unt { kind: k2, .. },
+                                    ) => LitValue::Unt {
+                                        kind: if matches!(kind, AssignKind::Plus) {
+                                            k1 + k2
+                                        } else {
+                                            k1 - k2
+                                        },
+                                        owner: *owner,
+                                    },
+                                    (
+                                        LitValue::Flt { kind: k1, owner },
+                                        LitValue::Flt { kind: k2, .. },
+                                    ) => LitValue::Flt {
+                                        kind: if matches!(kind, AssignKind::Plus) {
+                                            k1 + k2
+                                        } else {
+                                            k1 - k2
+                                        },
+                                        owner: *owner,
+                                    },
+                                    _ => unimplemented!(),
+                                }
+                                .type_check(heap_value.texpr.clone())?;
+                            }
+                            _ => unimplemented!(),
+                        }
+
                         return Ok(eval_value.type_check(heap_value.texpr.clone())?);
                     }
                 }
@@ -281,10 +368,10 @@ impl LExpr {
     fn eval_unary(&self, op: &Token, rhs: &LitValue) -> Result<LitValue, RunTimeError> {
         match (op.lexeme, rhs) {
             // `-a`, minus unary operation
-            ("-", &Int(a)) => Ok(Int(-a)),
-            ("-", &Flt(a)) => Ok(Flt(-a)),
+            ("-", &Int { kind: a, owner }) => Ok(Int { kind: -a, owner }),
+            ("-", &Flt { kind: a, owner }) => Ok(Flt { kind: -a, owner }),
             // `!` negation unary operator
-            ("!", &Bool(a)) => Ok(Bool(!a)),
+            ("!", &Bool { kind: a, owner }) => Ok(Bool { kind: !a, owner }),
             // TODO: `&`, `*`
             _ => Err(RunTimeError::OperationNotAllowed(rhs.clone(), op.lexeme)),
         }
@@ -297,96 +384,412 @@ impl LExpr {
         rhs: &LitValue,
     ) -> Result<LitValue, RunTimeError> {
         match (lhs, op.lexeme, rhs) {
-            // binary operations of `int`
-            (Int(a), "+", Int(b)) => Ok(Int(a + b)),
-            (Int(a), "-", Int(b)) => Ok(Int(a - b)),
-            (Int(a), "*", Int(b)) => Ok(Int(a * b)),
-            (Int(a), "/", Int(b)) => {
+            // Vector + Scalar (append to end)
+            (Vector { kind: a, owner }, "+", value @ Int { .. })
+            | (Vector { kind: a, owner }, "+", value @ Unt { .. })
+            | (Vector { kind: a, owner }, "+", value @ Flt { .. }) => {
+                let mut vec = a.clone();
+                vec.push(value.clone());
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Scalar + Vector (prepend to front)
+            (value @ Int { .. }, "+", Vector { kind: b, owner })
+            | (value @ Unt { .. }, "+", Vector { kind: b, owner })
+            | (value @ Flt { .. }, "+", Vector { kind: b, owner }) => {
+                let mut vec = vec![value.clone()];
+                vec.extend(b.clone());
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Vector - Scalar (append negative)
+            (Vector { kind: a, owner }, "-", Int { kind: b, .. }) => {
+                let mut vec = a.clone();
+                vec.push(Int { kind: -*b, owner });
+                Ok(Vector { kind: vec, owner })
+            }
+            (Vector { kind: a, owner }, "-", Flt { kind: b, .. }) => {
+                let mut vec = a.clone();
+                vec.push(Flt { kind: -*b, owner });
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Scalar - Vector (prepend negative)
+            (Int { kind: a, owner }, "-", Vector { kind: b, .. }) => {
+                let mut vec = vec![Int { kind: *a, owner }];
+                vec.extend(b.clone());
+                Ok(Vector { kind: vec, owner })
+            }
+            (Flt { kind: a, owner }, "-", Vector { kind: b, .. }) => {
+                let mut vec = vec![Flt { kind: *a, owner }];
+                vec.extend(b.clone());
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Vector * Scalar (multiply each element)
+            (Vector { kind: a, owner }, "*", scalar @ Int { kind: b, .. }) => {
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Int {
+                            kind: kind * b,
+                            owner,
+                        },
+                        Unt { kind, .. } => Unt {
+                            kind: (*kind as i64 * b) as u64,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind * *b as f64,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
+            }
+            (Vector { kind: a, owner }, "*", Unt { kind: b, .. }) => {
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Int {
+                            kind: kind * *b as i64,
+                            owner,
+                        },
+                        Unt { kind, .. } => Unt {
+                            kind: kind * b,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind * *b as f64,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
+            }
+            (Vector { kind: a, owner }, "*", Flt { kind: b, .. }) => {
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Flt {
+                            kind: *kind as f64 * b,
+                            owner,
+                        },
+                        Unt { kind, .. } => Flt {
+                            kind: *kind as f64 * b,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind * b,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Scalar * Vector (multiply each element)
+            (scalar @ Int { .. }, "*", Vector { kind: b, owner })
+            | (scalar @ Unt { .. }, "*", Vector { kind: b, owner })
+            | (scalar @ Flt { .. }, "*", Vector { kind: b, owner }) => LExpr::eval_binary(
+                self,
+                &lhs,
+                &Token {
+                    lexeme: "*",
+                    token: TokenType::Char('*'),
+                    lit: None,
+                },
+                &scalar,
+            ),
+
+            // Vector / Scalar (divide each element)
+            (Vector { kind: a, owner }, "/", Int { kind: b, .. }) => {
                 if *b == 0 {
                     return Err(RunTimeError::OperationNotAllowed(
                         lhs.clone(),
                         "division by 0",
                     ));
                 }
-                Ok(LitValue::Int(a / b))
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Int {
+                            kind: kind / b,
+                            owner,
+                        },
+                        Unt { kind, .. } => Unt {
+                            kind: *kind / *b as u64,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind / *b as f64,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
             }
-            (Int(a), "%", Int(b)) => Ok(Int(a % b)),
-            (Int(a), ">", Int(b)) => Ok(Bool(a > b)),
-            (Int(a), "<", Int(b)) => Ok(Bool(a < b)),
-            (Int(a), "==", Int(b)) => Ok(Bool(a == b)),
-            (Int(a), "!=", Int(b)) => Ok(Bool(a != b)),
-            (Int(a), "<=", Int(b)) => Ok(Bool(a <= b)),
-            (Int(a), ">=", Int(b)) => Ok(Bool(a >= b)),
-            // binary operations for unt
-            (Unt(a), "+", Unt(b)) => Ok(Unt(a + b)),
-            (Unt(a), "-", Unt(b)) => Ok(Unt(a - b)),
-            (Unt(a), "*", Unt(b)) => Ok(Unt(a * b)),
-            (Unt(a), "/", Unt(b)) => {
+            (Vector { kind: a, owner }, "/", Unt { kind: b, .. }) => {
                 if *b == 0 {
                     return Err(RunTimeError::OperationNotAllowed(
                         lhs.clone(),
                         "division by 0",
                     ));
                 }
-                Ok(LitValue::Unt(a / b))
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Int {
+                            kind: kind / *b as i64,
+                            owner,
+                        },
+                        Unt { kind, .. } => Unt {
+                            kind: kind / b,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind / *b as f64,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
             }
-            (Unt(a), "%", Unt(b)) => Ok(Unt(a % b)),
-            (Unt(a), ">", Unt(b)) => Ok(Bool(a > b)),
-            (Unt(a), "<", Unt(b)) => Ok(Bool(a < b)),
-            (Unt(a), "==", Unt(b)) => Ok(Bool(a == b)),
-            (Unt(a), "!=", Unt(b)) => Ok(Bool(a != b)),
-            (Unt(a), "<=", Unt(b)) => Ok(Bool(a <= b)),
-            (Unt(a), ">=", Unt(b)) => Ok(Bool(a >= b)),
-            // binary operations for flt
-            (Flt(a), "+", Flt(b)) => Ok(Flt(a + b)),
-            (Flt(a), "-", Flt(b)) => Ok(Flt(a - b)),
-            (Flt(a), "*", Flt(b)) => Ok(Flt(a * b)),
-            (Flt(a), "/", Flt(b)) => {
+            (Vector { kind: a, owner }, "/", Flt { kind: b, .. }) => {
                 if *b == 0.0 {
                     return Err(RunTimeError::OperationNotAllowed(
                         lhs.clone(),
                         "division by 0",
                     ));
                 }
-                Ok(LitValue::Flt(a / b))
+                let vec = a
+                    .iter()
+                    .map(|x| match x {
+                        Int { kind, .. } => Flt {
+                            kind: *kind as f64 / b,
+                            owner,
+                        },
+                        Unt { kind, .. } => Flt {
+                            kind: *kind as f64 / b,
+                            owner,
+                        },
+                        Flt { kind, .. } => Flt {
+                            kind: kind / b,
+                            owner,
+                        },
+                        _ => x.clone(),
+                    })
+                    .collect();
+                Ok(Vector { kind: vec, owner })
             }
-            (Flt(a), "%", Flt(b)) => Ok(Flt(a % b)),
-            (Flt(a), ">", Flt(b)) => Ok(Bool(a > b)),
-            (Flt(a), "<", Flt(b)) => Ok(Bool(a < b)),
-            (Flt(a), "==", Flt(b)) => Ok(Bool(a == b)),
-            (Flt(a), "!=", Flt(b)) => Ok(Bool(a != b)),
-            (Flt(a), "<=", Flt(b)) => Ok(Bool(a <= b)),
-            (Flt(a), ">=", Flt(b)) => Ok(Bool(a >= b)),
+
+            // Vector + Vector (concatenate)
+            (Vector { kind: a, owner }, "+", Vector { kind: b, .. }) => {
+                let mut vec = a.clone();
+                vec.extend(b.clone());
+                Ok(Vector { kind: vec, owner })
+            }
+
+            // Vector * Vector (cartesian product multiplication)
+            (Vector { kind: a, owner }, "*", Vector { kind: b, .. }) => {
+                let mut vec = Vec::new();
+                for x in a.iter() {
+                    for y in b.iter() {
+                        match (x, y) {
+                            (Int { kind: k1, .. }, Int { kind: k2, .. }) => vec.push(Int {
+                                kind: k1 * k2,
+                                owner,
+                            }),
+                            (Int { kind: k1, .. }, Unt { kind: k2, .. }) => vec.push(Int {
+                                kind: k1 * *k2 as i64,
+                                owner,
+                            }),
+                            (Int { kind: k1, .. }, Flt { kind: k2, .. }) => vec.push(Flt {
+                                kind: *k1 as f64 * k2,
+                                owner,
+                            }),
+                            (Unt { kind: k1, .. }, Int { kind: k2, .. }) => vec.push(Int {
+                                kind: *k1 as i64 * k2,
+                                owner,
+                            }),
+                            (Unt { kind: k1, .. }, Unt { kind: k2, .. }) => vec.push(Unt {
+                                kind: k1 * k2,
+                                owner,
+                            }),
+                            (Unt { kind: k1, .. }, Flt { kind: k2, .. }) => vec.push(Flt {
+                                kind: *k1 as f64 * k2,
+                                owner,
+                            }),
+                            (Flt { kind: k1, .. }, Int { kind: k2, .. }) => vec.push(Flt {
+                                kind: k1 * *k2 as f64,
+                                owner,
+                            }),
+                            (Flt { kind: k1, .. }, Unt { kind: k2, .. }) => vec.push(Flt {
+                                kind: k1 * *k2 as f64,
+                                owner,
+                            }),
+                            (Flt { kind: k1, .. }, Flt { kind: k2, .. }) => vec.push(Flt {
+                                kind: k1 * k2,
+                                owner,
+                            }),
+                            _ => continue,
+                        }
+                    }
+                }
+                Ok(Vector { kind: vec, owner })
+            }
+            // binary operations of `int`
+            (Int { kind: a, owner }, "+", Int { kind: b, .. }) => Ok(Int { kind: a + b, owner }),
+            (Int { kind: a, owner }, "-", Int { kind: b, .. }) => Ok(Int { kind: a - b, owner }),
+            (Int { kind: a, owner }, "*", Int { kind: b, .. }) => Ok(Int { kind: a * b, owner }),
+            (Int { kind: a, owner }, "/", Int { kind: b, .. }) => {
+                if *b == 0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::Int { kind: a / b, owner })
+            }
+            (Int { kind: a, owner }, "%", Int { kind: b, .. }) => Ok(Int { kind: a % b, owner }),
+            (Int { kind: a, owner }, ">", Int { kind: b, .. }) => Ok(Bool { kind: a > b, owner }),
+            (Int { kind: a, owner }, "<", Int { kind: b, .. }) => Ok(Bool { kind: a < b, owner }),
+            (Int { kind: a, owner }, "==", Int { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Int { kind: a, owner }, "!=", Int { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Int { kind: a, owner }, "<=", Int { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Int { kind: a, owner }, ">=", Int { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for unt
+            (Unt { kind: a, owner }, "+", Unt { kind: b, .. }) => Ok(Unt { kind: a + b, owner }),
+            (Unt { kind: a, owner }, "-", Unt { kind: b, .. }) => Ok(Unt { kind: a - b, owner }),
+            (Unt { kind: a, owner }, "*", Unt { kind: b, .. }) => Ok(Unt { kind: a * b, owner }),
+            (Unt { kind: a, owner }, "/", Unt { kind: b, .. }) => {
+                if *b == 0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::Unt { kind: a / b, owner })
+            }
+            (Unt { kind: a, owner }, "%", Unt { kind: b, .. }) => Ok(Unt { kind: a % b, owner }),
+            (Unt { kind: a, owner }, ">", Unt { kind: b, .. }) => Ok(Bool { kind: a > b, owner }),
+            (Unt { kind: a, owner }, "<", Unt { kind: b, .. }) => Ok(Bool { kind: a < b, owner }),
+            (Unt { kind: a, owner }, "==", Unt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Unt { kind: a, owner }, "!=", Unt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Unt { kind: a, owner }, "<=", Unt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Unt { kind: a, owner }, ">=", Unt { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for flt
+            (Flt { kind: a, owner }, "+", Flt { kind: b, .. }) => Ok(Flt { kind: a + b, owner }),
+            (Flt { kind: a, owner }, "-", Flt { kind: b, .. }) => Ok(Flt { kind: a - b, owner }),
+            (Flt { kind: a, owner }, "*", Flt { kind: b, .. }) => Ok(Flt { kind: a * b, owner }),
+            (Flt { kind: a, owner }, "/", Flt { kind: b, .. }) => {
+                if *b == 0.0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::Flt { kind: a / b, owner })
+            }
+            (Flt { kind: a, owner }, "%", Flt { kind: b, .. }) => Ok(Flt { kind: a % b, owner }),
+            (Flt { kind: a, owner }, ">", Flt { kind: b, .. }) => Ok(Bool { kind: a > b, owner }),
+            (Flt { kind: a, owner }, "<", Flt { kind: b, .. }) => Ok(Bool { kind: a < b, owner }),
+            (Flt { kind: a, owner }, "==", Flt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Flt { kind: a, owner }, "!=", Flt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Flt { kind: a, owner }, "<=", Flt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Flt { kind: a, owner }, ">=", Flt { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
             // binary operations for bool
-            (Bool(a), "+", Bool(b)) => Ok(Bool(*a == true && *b == true)),
-            (Bool(a), "-", Bool(b)) => Ok(Bool(*a == false && *b == false)),
-            (Bool(a), "*", Bool(b)) => Ok(Bool(*a == true || *b == true)),
-            (Bool(a), "/", Bool(b)) => Ok(Bool(*a == false || *b == false)),
-            (Bool(a), ">", Bool(b)) => Ok(Bool(a > b)),
-            (Bool(a), "<", Bool(b)) => Ok(Bool(a < b)),
-            (Bool(a), "==", Bool(b)) => Ok(Bool(a == b)),
-            (Bool(a), "!=", Bool(b)) => Ok(Bool(a != b)),
-            (Bool(a), "<=", Bool(b)) => Ok(Bool(a <= b)),
-            (Bool(a), ">=", Bool(b)) => Ok(Bool(a >= b)),
+            (Bool { kind: a, owner }, ">", Bool { kind: b, .. }) => Ok(Bool { kind: a > b, owner }),
+            (Bool { kind: a, owner }, "<", Bool { kind: b, .. }) => Ok(Bool { kind: a < b, owner }),
+            (Bool { kind: a, owner }, "==", Bool { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Bool { kind: a, owner }, "!=", Bool { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Bool { kind: a, owner }, "<=", Bool { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Bool { kind: a, owner }, ">=", Bool { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
             // binary operations for str
-            (Str(a), "+", Str(b)) => Ok(Str(format!("{}{}", a, b))),
-            (Str(a), ">", Str(b)) => Ok(Bool(a > b)),
-            (Str(a), "<", Str(b)) => Ok(Bool(a < b)),
-            (Str(a), "==", Str(b)) => Ok(Bool(a == b)),
-            (Str(a), "!=", Str(b)) => Ok(Bool(a != b)),
-            (Str(a), "<=", Str(b)) => Ok(Bool(a <= b)),
-            (Str(a), ">=", Str(b)) => Ok(Bool(a >= b)),
-            // binary operations for str
-            (Nil, ">", _) => Ok(Bool(false)),
-            (Nil, "<", _) => Ok(Bool(false)),
-            (Nil, "==", Nil) => Ok(Bool(true)),
-            (Nil, "==", _) => Ok(Bool(false)),
-            (Nil, ">=", Nil) => Ok(Bool(true)),
-            (Nil, ">=", _) => Ok(Bool(false)),
-            (Nil, "!=", Nil) => Ok(Bool(true)),
-            (Nil, "!=", _) => Ok(Bool(true)),
-            (Nil, "<=", Nil) => Ok(Bool(true)),
-            (Nil, "<=", _) => Ok(Bool(false)),
+            (Str { kind: a, owner }, "+", Str { kind: b, .. }) => Ok(Str {
+                kind: format!("{}{}", a, b),
+                owner,
+            }),
+            (Str { kind: a, owner }, ">", Str { kind: b, .. }) => Ok(Bool { kind: a > b, owner }),
+            (Str { kind: a, owner }, "<", Str { kind: b, .. }) => Ok(Bool { kind: a < b, owner }),
+            (Str { kind: a, owner }, "==", Str { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Str { kind: a, owner }, "!=", Str { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Str { kind: a, owner }, "<=", Str { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (Str { kind: a, owner }, ">=", Str { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for nil
+            (Nil, "<=", Nil) | (Nil, ">=", Nil) | (Nil, "!=", Nil) | (Nil, "==", Nil) => Ok(Bool {
+                kind: true,
+                owner: "",
+            }),
+            (Nil, _, _) | (_, _, Nil) => Ok(Bool {
+                kind: false,
+                owner: "",
+            }),
             _ => Err(RunTimeError::UnimplementedOperation(op.lexeme)),
         }
     }

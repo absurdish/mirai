@@ -1,5 +1,12 @@
 # Changelog
 
+### 0.0.8
+
+- added vector type
+- added assign operations
+- updated arithmetics
+- updated value ownership system
+
 #### 0.0.7
 
 - internal redesign

@@ -2,26 +2,39 @@ use crate::ast::{
     texp::TExpr,
     LitValue::{self, *},
 };
-
 use super::interpreter::RunTimeError;
 
 impl LitValue {
     pub fn type_check(&self, texpr: TExpr) -> Result<LitValue, RunTimeError> {
+        let mut nonlit = false;
         if let TExpr::Literal(name) = texpr {
-            let check = match self {
-                Int(_) => name == "int",
-                Unt(_) => name == "unt",
-                Flt(_) => name == "flt",
-                Bool(_) => name == "bool",
-                Str(_) => name == "str",
+            let checks = match self {
+                Int { .. } => name == "int",
+                Unt { .. } => name == "unt",
+                Flt { .. } => name == "flt",
+                Bool { .. } => name == "bool",
+                Str { .. } => name == "str",
                 HeapRef(_) | Fun(_) => true,
                 Void => name == "void",
                 Nil => name == "nil",
+                Vector { .. } => {
+                    nonlit = true;
+                    false
+                }
             };
-            if !check {
-                return Err(RunTimeError::TypeError(self.clone(), texpr));
+
+            if !nonlit {
+                return if !checks {
+                    Err(RunTimeError::TypeError(self.clone(), texpr))
+                } else {
+                    Ok(self.clone())
+                };
             }
-            return Ok(self.clone());
+        } else if let TExpr::Vec(inner_type) = texpr.clone() {
+            return match self {
+                Vector { kind, .. } => kind[0].type_check(*inner_type),
+                _ => Err(RunTimeError::TypeError(self.clone(), texpr)),
+            };
         }
         Ok(self.clone())
     }

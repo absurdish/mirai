@@ -65,6 +65,10 @@ pub enum LExpr {
     /// (2 + 2)*(4 + 4)
     /// ```
     Grouping { id: usize, expr: Box<LExpr> },
+    /// a vector type
+    ///
+    /// [1, 2, 3, 4]
+    Vector { id: usize, elems: Vec<LExpr> },
     /// expression for literal values
     Value { id: usize, lit: LitValue },
 }
@@ -212,6 +216,24 @@ impl Ast {
                 Ok(LExpr::Grouping {
                     id: self.next_id(),
                     expr: Box::new(expr),
+                })
+            }
+            Char('[') => {
+                self.advances()?;
+                let mut elems = Vec::with_capacity(4);
+                if !self.check(Char(']')) {
+                    loop {
+                        let elem = self.lexpr()?;
+                        elems.push(elem);
+                        if !self.match_token(Char(',')) {
+                            break;
+                        }
+                    }
+                }
+                self.consumes(Char(']'))?;
+                Ok(LExpr::Vector {
+                    id: self.next_id(),
+                    elems,
                 })
             }
             Literal(_) => {
