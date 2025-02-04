@@ -1,8 +1,8 @@
+use super::interpreter::RunTimeError;
 use crate::ast::{
     texp::TExpr,
     LitValue::{self, *},
 };
-use super::interpreter::RunTimeError;
 
 impl LitValue {
     pub fn type_check(&self, texpr: TExpr) -> Result<LitValue, RunTimeError> {
@@ -14,7 +14,10 @@ impl LitValue {
                 Flt { .. } => name == "flt",
                 Bool { .. } => name == "bool",
                 Str { .. } => name == "str",
-                HeapRef(_) | Fun(_) => true,
+                ImInt { .. } => name == "imi",
+                ImUnt { .. } => name == "imu",
+                ImFlt { .. } => name == "imf",
+                HeapRef(_) | Fun(_) | Map(_) => true,
                 Void => name == "void",
                 Nil => name == "nil",
                 Vector { .. } => {

@@ -1,5 +1,11 @@
 # Changelog
 
+### 0.0.9
+
+- added imaginary numbers
+- implemented std functions 
+- fixed unsigned integer declaration problem
+
 ### 0.0.8
 
 - added vector type

@@ -34,7 +34,7 @@ impl Display for RunTimeError {
             Self::OperationNotAllowed(v, o) => {
                 write!(f, "operation '{}' isn't allowed for '{}'", o, v)
             }
-            Self::VariableNotFound(a) => write!(f, "variable '{}' has yet been declared", a),
+            Self::VariableNotFound(a) => write!(f, "variable '{}' hasn't yet been declared", a),
             Self::UnimplementedOperation(o) => {
                 write!(f, "operation '{}' hasn't been implemented", o)
             }

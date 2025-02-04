@@ -59,6 +59,21 @@ pub enum LitValue {
         kind: f64,
         owner: &'static str,
     },
+    /// imaginary signed integer type
+    ImInt {
+        kind: i64,
+        owner: &'static str,
+    },
+    /// imaginary unsigned integer type
+    ImUnt {
+        kind: u64,
+        owner: &'static str,
+    },
+    /// imaginary floating point number type
+    ImFlt {
+        kind: f64,
+        owner: &'static str,
+    },
     /// string type
     Str {
         kind: String,
@@ -75,6 +90,7 @@ pub enum LitValue {
     Nil,
     HeapRef(usize),
     Fun(Box<Function>),
+    Map(&'static str),
 }
 use LitValue::*;
 
@@ -94,8 +110,12 @@ impl Display for LitValue {
             Int { kind, .. } => write!(f, "{}", kind),
             Unt { kind, .. } => write!(f, "{}", kind),
             Flt { kind, .. } => write!(f, "{}", kind),
+            ImInt { kind, .. } => write!(f, "{}i", kind),
+            ImUnt { kind, .. } => write!(f, "{}i", kind),
+            ImFlt { kind, .. } => write!(f, "{}i", kind),
             Bool { kind, .. } => write!(f, "{}", kind),
             Str { kind, .. } => write!(f, "{}", kind),
+            Map(name) => write!(f, "{}()", name),
             Void => write!(f, "void"),
             Nil => write!(f, "nil"),
             HeapRef(e) => write!(f, "ref{}*", e),
@@ -107,12 +127,12 @@ impl Display for LitValue {
 impl LitValue {
     pub fn is_truthy(&self) -> bool {
         match self {
-            Nil | Void | HeapRef(_) | Fun(_) => false,
-            Flt { kind, .. } => *kind != 0.0,
+            Nil | Void | HeapRef(_) | Fun(_) | Map(_) => false,
+            Flt { kind, .. } | ImFlt { kind, .. } => *kind != 0.0,
             Str { kind, .. } => kind.len() != 0,
-            Unt { kind, .. } => *kind != 0,
+            Unt { kind, .. } | ImUnt { kind, .. } => *kind != 0,
             Bool { kind, .. } => *kind,
-            Int { kind, .. } => *kind != 0,
+            Int { kind, .. } | ImInt { kind, .. } => *kind != 0,
             Vector { kind, .. } => kind.len() != 0,
         }
     }
@@ -145,7 +165,8 @@ impl LitValue {
 pub const KEYWORDS: &[&str] = &[
     // statement keywords
     "if", "else", "while", "return", "break", "print", // type keywords
-    "int", "unt", "flt", "bool", "str", "nil", "void", // reserver keywords
+    "int", "unt", "flt", "bool", "str", "nil", "void", "imi", "imu", "imf",
+    // reserved keywords
     "for", "impl", "as", "to", "use", "trait",
 ];
 /// default buffer size for storing tokens (pre-allocation increases effeciency)

@@ -123,6 +123,7 @@ impl Ast {
             // numbers
             9 => {
                 let mut is_float = false;
+                let mut is_im = false;
                 while self.peek_byte(0).is_ascii_digit() {
                     self.advance();
                 }
@@ -133,26 +134,49 @@ impl Ast {
                         self.advance();
                     }
                 }
+                if self.peek() == 'i' {
+                    is_im = true;
+                }
 
                 let lexeme = &self.input[self.start..self.current_token];
 
                 // TODO: implement auto-resizing
                 let value = if is_float {
-                    LitValue::Flt {
-                        kind: lexeme.parse::<f64>().expect("failed to unwrap a number"),
-                        owner: "",
+                    if is_im {
+                        LitValue::ImFlt {
+                            kind: lexeme.parse::<f64>().expect("failed to unwrap a number"),
+                            owner: "",
+                        }
+                    } else {
+                        LitValue::Flt {
+                            kind: lexeme.parse::<f64>().expect("failed to unwrap a number"),
+                            owner: "",
+                        }
                     }
                 } else {
-                    LitValue::Int {
-                        kind: lexeme.parse::<i64>().expect("failed to unwrap a number"),
-                        owner: "",
+                    if is_im {
+                        LitValue::ImInt {
+                            kind: lexeme.parse::<i64>().expect("failed to unwrap a number"),
+                            owner: "",
+                        }
+                    } else {
+                        LitValue::Int {
+                            kind: lexeme.parse::<i64>().expect("failed to unwrap a number"),
+                            owner: "",
+                        }
                     }
                 };
+                if is_im {
+                    self.advance();
+                }
                 self.push(Literal(value.clone()), Some(value));
             }
             // identifiers and keywords
             10 => {
-                while UnicodeXID::is_xid_continue(self.peek()) {
+                while UnicodeXID::is_xid_continue(self.peek())
+                    || self.peek() == '_'
+                    || self.peek() == '!'
+                {
                     self.advance();
                 }
                 let lexeme = &self.input[self.start..self.current_token];

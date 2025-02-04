@@ -1,0 +1,11 @@
+- modality (`use as main`, `use main::myfunc`, `int Name = 'public value'`)
+- math module (matrices, determinants, better vectors, tensors, std math, quantum states)
+- async/await
+- http and fs module 
+- full-fetched ownernship and borrowing system
+- type system (algebraic data types, `type id = texpr`, traits, lifetimes, generics inference)
+- functional programming (`impl for texpr {}`, `32.sqrt()`)
+- testing and  debugging tools
+- prettier output system
+- wasm compiler integration
+- meta programming

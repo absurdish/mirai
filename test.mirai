@@ -11,3 +11,6 @@ while i < 10000 {
 }
 
 print sum
+
+unt x = unt!(32)
+print x

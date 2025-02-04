@@ -23,7 +23,7 @@ impl Ast {
                 } else if peek == "[" {
                     self.advances()?;
                     self.consumes(Char(']'))?;
-                  
+
                     return Ok(TExpr::Vec(Box::new(TExpr::Literal(name.lexeme))));
                 }
                 Ok(TExpr::Literal(name.lexeme))
@@ -34,6 +34,9 @@ impl Ast {
 
     #[inline]
     pub fn is_type_kwd(&self, kwd: &str) -> bool {
-        matches!(kwd, "int" | "unt" | "flt" | "bool" | "str" | "nil" | "void")
+        matches!(
+            kwd,
+            "int" | "unt" | "flt" | "bool" | "str" | "nil" | "void" | "imi" | "imu" | "imf"
+        )
     }
 }

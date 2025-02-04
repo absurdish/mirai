@@ -12,7 +12,7 @@ use crate::core::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::interpreter::RunTimeError;
+use super::{env::map, interpreter::RunTimeError};
 
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -250,8 +250,20 @@ impl LExpr {
                 self.eval_binary(&lhs.eval(Rc::clone(&mem))?, op, &rhs.eval(mem)?)
             }
             LExpr::Call { name, args, .. } => {
-                if let LitValue::Fun(func) = name.eval(Rc::clone(&mem))? {
+                let name = name.eval(Rc::clone(&mem))?;
+                if let LitValue::Fun(func) = name {
                     self.run_fn(*func, args, mem)
+                } else if let LitValue::Map(func) = name {
+                    let mut litargs = Vec::new();
+                    for arg in args {
+                        litargs.push(arg.eval(Rc::clone(&mem))?);
+                    }
+                    let res = if let Ok(e) = map(litargs).get(func).unwrap() {
+                        e.clone()
+                    } else {
+                        LitValue::Nil
+                    };
+                    Ok(res)
                 } else {
                     Ok(LitValue::Nil)
                 }
@@ -278,6 +290,13 @@ impl LExpr {
 
                     return Err(RunTimeError::VariableNotFound(name.lexeme));
                 }
+
+                // implement name search here
+
+                if map(vec![LitValue::Nil]).get(name.lexeme).is_some() {
+                    return Ok(Map(name.lexeme));
+                }
+
                 // if variable can't be found on the stack, return a null value, for now
                 return Err(RunTimeError::VariableNotFound(name.lexeme));
             }
@@ -370,6 +389,8 @@ impl LExpr {
             // `-a`, minus unary operation
             ("-", &Int { kind: a, owner }) => Ok(Int { kind: -a, owner }),
             ("-", &Flt { kind: a, owner }) => Ok(Flt { kind: -a, owner }),
+            ("-", &ImInt { kind: a, owner }) => Ok(ImInt { kind: -a, owner }),
+            ("-", &ImFlt { kind: a, owner }) => Ok(ImFlt { kind: -a, owner }),
             // `!` negation unary operator
             ("!", &Bool { kind: a, owner }) => Ok(Bool { kind: !a, owner }),
             // TODO: `&`, `*`
@@ -736,6 +757,139 @@ impl LExpr {
                 owner,
             }),
             (Flt { kind: a, owner }, ">=", Flt { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for imaginary numbers:
+            // binary operations of `int`
+            (ImInt { kind: a, owner }, "+", ImInt { kind: b, .. }) => {
+                Ok(ImInt { kind: a + b, owner })
+            }
+            (ImInt { kind: a, owner }, "-", ImInt { kind: b, .. }) => {
+                Ok(ImInt { kind: a - b, owner })
+            }
+            (ImInt { kind: a, owner }, "*", ImInt { kind: b, .. }) => {
+                Ok(ImInt { kind: a * b, owner })
+            }
+            (ImInt { kind: a, owner }, "/", ImInt { kind: b, .. }) => {
+                if *b == 0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::ImInt { kind: a / b, owner })
+            }
+            (ImInt { kind: a, owner }, "%", ImInt { kind: b, .. }) => {
+                Ok(ImInt { kind: a % b, owner })
+            }
+            (ImInt { kind: a, owner }, ">", ImInt { kind: b, .. }) => {
+                Ok(Bool { kind: a > b, owner })
+            }
+            (ImInt { kind: a, owner }, "<", ImInt { kind: b, .. }) => {
+                Ok(Bool { kind: a < b, owner })
+            }
+            (ImInt { kind: a, owner }, "==", ImInt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImInt { kind: a, owner }, "!=", ImInt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImInt { kind: a, owner }, "<=", ImInt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImInt { kind: a, owner }, ">=", ImInt { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for unt
+            (ImUnt { kind: a, owner }, "+", ImUnt { kind: b, .. }) => {
+                Ok(ImUnt { kind: a + b, owner })
+            }
+            (ImUnt { kind: a, owner }, "-", ImUnt { kind: b, .. }) => {
+                Ok(ImUnt { kind: a - b, owner })
+            }
+            (ImUnt { kind: a, owner }, "*", ImUnt { kind: b, .. }) => {
+                Ok(ImUnt { kind: a * b, owner })
+            }
+            (ImUnt { kind: a, owner }, "/", ImUnt { kind: b, .. }) => {
+                if *b == 0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::ImUnt { kind: a / b, owner })
+            }
+            (ImUnt { kind: a, owner }, "%", ImUnt { kind: b, .. }) => {
+                Ok(ImUnt { kind: a % b, owner })
+            }
+            (ImUnt { kind: a, owner }, ">", ImUnt { kind: b, .. }) => {
+                Ok(Bool { kind: a > b, owner })
+            }
+            (ImUnt { kind: a, owner }, "<", ImUnt { kind: b, .. }) => {
+                Ok(Bool { kind: a < b, owner })
+            }
+            (ImUnt { kind: a, owner }, "==", ImUnt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImUnt { kind: a, owner }, "!=", ImUnt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImUnt { kind: a, owner }, "<=", ImUnt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImUnt { kind: a, owner }, ">=", ImUnt { kind: b, .. }) => Ok(Bool {
+                kind: a >= b,
+                owner,
+            }),
+            // binary operations for flt
+            (ImFlt { kind: a, owner }, "+", ImFlt { kind: b, .. }) => {
+                Ok(ImFlt { kind: a + b, owner })
+            }
+            (ImFlt { kind: a, owner }, "-", ImFlt { kind: b, .. }) => {
+                Ok(ImFlt { kind: a - b, owner })
+            }
+            (ImFlt { kind: a, owner }, "*", ImFlt { kind: b, .. }) => {
+                Ok(ImFlt { kind: a * b, owner })
+            }
+            (ImFlt { kind: a, owner }, "/", ImFlt { kind: b, .. }) => {
+                if *b == 0.0 {
+                    return Err(RunTimeError::OperationNotAllowed(
+                        lhs.clone(),
+                        "division by 0",
+                    ));
+                }
+                Ok(LitValue::ImFlt { kind: a / b, owner })
+            }
+            (ImFlt { kind: a, owner }, "%", ImFlt { kind: b, .. }) => {
+                Ok(ImFlt { kind: a % b, owner })
+            }
+            (ImFlt { kind: a, owner }, ">", ImFlt { kind: b, .. }) => {
+                Ok(Bool { kind: a > b, owner })
+            }
+            (ImFlt { kind: a, owner }, "<", ImFlt { kind: b, .. }) => {
+                Ok(Bool { kind: a < b, owner })
+            }
+            (ImFlt { kind: a, owner }, "==", ImFlt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImFlt { kind: a, owner }, "!=", ImFlt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImFlt { kind: a, owner }, "<=", ImFlt { kind: b, .. }) => Ok(Bool {
+                kind: a <= b,
+                owner,
+            }),
+            (ImFlt { kind: a, owner }, ">=", ImFlt { kind: b, .. }) => Ok(Bool {
                 kind: a >= b,
                 owner,
             }),

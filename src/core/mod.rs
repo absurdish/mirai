@@ -7,6 +7,7 @@ pub mod interpreter;
 pub mod memory;
 pub mod resolver;
 pub mod types;
+pub mod env;
 
 pub fn run(input: &'static str) {
     let mut ast = Ast::new(input);
